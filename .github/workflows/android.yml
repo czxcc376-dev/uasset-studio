@@ -34,11 +34,8 @@ jobs:
       - name: 构建 Web 资源
         run: node scripts/build-web.mjs
 
-      - name: 校验 Web 资源无远端依赖
-        run: |
-          set -e
-          ! grep -q "xdnb886\|cfg.json\|__HP_ASSET\|__HP_VOICE" web/index.html
-          echo "Web 资源干净"
+      - name: 校验 Web 产物洁净性
+        run: node scripts/verify-web.mjs
 
       - name: 生成测试夹具并跑测试
         run: |

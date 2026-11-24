@@ -43,12 +43,8 @@ jobs:
       - name: 构建 Web 包
         run: node scripts/build-web.mjs
 
-      - name: 校验 index.html 不含远端依赖
-        run: |
-          set -e
-          ! grep -q "xdnb886\|cfg.json\|kill switch\|__HP_ASSET\|__HP_VOICE" web/index.html
-          ! grep -q "data2.js" web/index.html
-          echo "index.html 无远端门禁 / 无第三方注入内容"
+      - name: 校验 Web 产物洁净性
+        run: node scripts/verify-web.mjs
 
       - name: 上传静态站点
         uses: actions/upload-artifact@v4
