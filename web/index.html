@@ -1,0 +1,2218 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+    <title>Sace 资产编辑器</title>
+    <style>
+        /* ============================================
+           CSS VARIABLES (Dark Theme Default)
+           ============================================ */
+        :root {
+            --bg-dark: #1e1e1e;
+            --bg-sidebar: #252526;
+            --bg-header: #2d2d30;
+            --border-color: #3e3e42;
+            --text-main: #f1f1f1;
+            --text-dim: #969696;
+            --selection: #007acc;
+            --hover: #2a2d2e;
+            /* New Vars */
+            --btn-bg: #3e3e42;
+            --btn-save: #2da042;
+            --btn-save-border: #1e7e34;
+            --syntax-name: #9cdcfe;
+            --syntax-type: #4ec9b0;
+            --syntax-variant: #b5cea8;
+            --syntax-val: #ce9178;
+            --syntax-float: #ce9178;
+            --syntax-object: #9cdcfe;
+            --syntax-bool: #4fc1ff;
+            --syntax-str: #dcdcaa;
+        }
+
+        /* ============================================
+           SHARED LAYOUT CSS (No Colors)
+           ============================================ */
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            transition: background-color 0.5s ease, color 0.5s ease, border-color 0.5s ease, box-shadow 0.5s ease;
+        }
+
+        input,
+        textarea {
+            user-select: text;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        html,
+        body {
+            text-size-adjust: none;
+            -webkit-text-size-adjust: none;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            font-size: 13px;
+            touch-action: manipulation;
+        }
+
+        .toolbar {
+            min-height: 32px;
+            background-color: var(--bg-header);
+            display: flex;
+            align-items: center;
+            padding: 4px 10px;
+            border-bottom: 1px solid var(--border-color);
+            flex-wrap: wrap;
+            gap: 8px;
+            position: relative;
+        }
+
+        .toolbar-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .toolbar-spacer {
+            flex: 1;
+        }
+
+        .toolbar-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .menu-toggle {
+            display: none;
+            background: var(--btn-bg);
+            color: var(--text-main);
+            border: 1px solid var(--border-color);
+            padding: 0;
+            cursor: pointer;
+            font-size: 16px;
+            height: 32px;
+            width: 32px;
+            align-items: center;
+            justify-content: center;
+            -webkit-tap-highlight-color: transparent;
+            border-radius: 6px;
+        }
+
+        .menu-toggle:active {
+            background-color: var(--hover);
+        }
+
+        .menu-toggle svg {
+            width: 18px;
+            height: 18px;
+            stroke: currentColor;
+        }
+
+        .history-btn {
+            background: transparent;
+            border: none;
+            padding: 0;
+            cursor: pointer;
+            width: 32px;
+            height: 32px;
+            min-width: 32px;
+            min-height: 32px;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-main);
+            opacity: 0.3;
+            transition: opacity 0.2s ease, background-color 0.2s ease;
+            -webkit-tap-highlight-color: transparent;
+            border-radius: 6px;
+        }
+
+        #historyGroup {
+            display: flex;
+            flex-direction: row !important;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Show history buttons after file is loaded */
+        body.file-loaded .history-btn {
+            display: flex;
+        }
+
+        .history-btn:not(:disabled) {
+            opacity: 1.0;
+        }
+
+        .history-btn:not(:disabled):active {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .history-btn:disabled {
+            cursor: not-allowed;
+        }
+
+        .history-btn svg {
+            width: 18px;
+            height: 18px;
+            stroke: currentColor;
+        }
+
+        .file-btn,
+        .save-btn {
+            height: 32px;
+            padding: 0 12px;
+            cursor: pointer;
+            font-size: 12px;
+            border: 1px solid #555;
+            -webkit-tap-highlight-color: transparent;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-sizing: border-box;
+        }
+
+        .file-btn {
+            background-color: var(--btn-save);
+            color: white;
+            border: 1px solid var(--btn-save-border);
+        }
+
+        body.file-loaded .file-btn {
+            background: var(--btn-bg);
+            color: var(--text-main);
+            border: 1px solid #555;
+        }
+
+        .file-btn:active {
+            background-color: var(--hover);
+        }
+
+        .save-btn {
+            background-color: var(--btn-save);
+            color: white;
+            border: 1px solid var(--btn-save-border);
+            display: none;
+            /* Hidden by default */
+        }
+
+        body.file-loaded .save-btn {
+            display: flex;
+            /* Shown only after file is loaded */
+        }
+
+        .save-btn:active {
+            background-color: #28a745;
+        }
+
+        .file-info {
+            margin-left: auto;
+            color: var(--text-dim);
+            font-size: 13px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .main-container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 998;
+        }
+
+        .sidebar-overlay.show {
+            display: block;
+        }
+
+        .sidebar {
+            width: 320px;
+            background-color: var(--bg-sidebar);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            overflow: auto;
+            padding-top: 0;
+            transition: transform 0.3s ease-in-out;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .sidebar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        .sidebar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .sidebar::-webkit-scrollbar-thumb {
+            background: rgba(128, 128, 128, 0.3);
+            border-radius: 3px;
+            transition: background 0.2s ease;
+        }
+
+        .sidebar::-webkit-scrollbar-thumb:hover {
+            background: rgba(128, 128, 128, 0.5);
+        }
+
+        .sidebar::-webkit-scrollbar-corner {
+            background: transparent;
+        }
+
+        .sidebar {
+            scrollbar-width: thin;
+            scrollbar-color: rgba(128, 128, 128, 0.3) transparent;
+        }
+
+        ul {
+            padding: 0;
+            margin: 0;
+            list-style: none;
+        }
+
+        .node-content {
+            display: flex;
+            align-items: center;
+            padding: 4px 4px;
+            cursor: pointer;
+            white-space: nowrap;
+            min-height: 32px;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+        }
+
+        .node-content:active {
+            background-color: var(--hover);
+        }
+
+        .node-content.selected {
+            background-color: var(--selection);
+            color: white;
+        }
+
+        .toggle-box {
+            width: 22px;
+            height: 22px;
+            min-width: 22px;
+            min-height: 22px;
+            border: 1px solid var(--border-color);
+            background-color: var(--bg-sidebar);
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            margin-right: 6px;
+            font-family: monospace;
+            font-size: 14px;
+            color: var(--text-main);
+            line-height: 1;
+            position: relative;
+            z-index: 2;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+        }
+
+        .toggle-box:active {
+            border-color: var(--text-main);
+            color: var(--text-main);
+            background-color: var(--hover);
+        }
+
+        .toggle-box.empty {
+            visibility: hidden;
+        }
+
+        .node-icon {
+            width: 18px;
+            text-align: center;
+            margin-right: 5px;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+
+        .nested-group {
+            display: none !important;
+            padding-left: 16px;
+            border-left: 1px dotted var(--border-color);
+            margin-left: 6px;
+        }
+
+        .nested-group.show {
+            display: block !important;
+        }
+
+        .content {
+            flex: 1;
+            background-color: var(--bg-dark);
+            overflow: hidden;
+            -webkit-overflow-scrolling: touch;
+            position: relative;
+        }
+
+        /* Enable scroll only after file is loaded */
+        body.file-loaded .content {
+            overflow: auto;
+        }
+
+        .content::-webkit-scrollbar,
+        .table-wrapper::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        .content::-webkit-scrollbar-track,
+        .table-wrapper::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .content::-webkit-scrollbar-thumb,
+        .table-wrapper::-webkit-scrollbar-thumb {
+            background: rgba(128, 128, 128, 0.3);
+            border-radius: 3px;
+            transition: background 0.2s ease;
+        }
+
+        .content::-webkit-scrollbar-thumb:hover,
+        .table-wrapper::-webkit-scrollbar-thumb:hover {
+            background: rgba(128, 128, 128, 0.5);
+        }
+
+        .content::-webkit-scrollbar-corner,
+        .table-wrapper::-webkit-scrollbar-corner {
+            background: transparent;
+        }
+
+        .content,
+        .table-wrapper {
+            scrollbar-width: thin;
+            scrollbar-color: rgba(128, 128, 128, 0.3) transparent;
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+            overflow-y: auto;
+            width: 100%;
+            height: 100%;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: 'Consolas', monospace;
+            font-size: 1em;
+            min-width: 100%;
+        }
+
+        /* Hide table header before file is loaded */
+        #propertyTable thead {
+            display: none;
+        }
+
+        body.file-loaded #propertyTable thead {
+            display: table-header-group;
+        }
+
+        th {
+            background-color: var(--bg-header);
+            text-align: left;
+            padding: 6px 8px;
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            font-weight: normal;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            white-space: nowrap;
+            font-size: 1em;
+        }
+
+        td {
+            padding: 4px 6px;
+            border: 1px solid var(--border-color);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: var(--text-main);
+            font-size: 1em;
+        }
+
+        /* Name Map specific styles - allow full names to display */
+        .namemap-row .col-name {
+            white-space: normal;
+            word-break: break-all;
+            overflow: visible;
+            text-overflow: unset;
+        }
+
+        .namemap-edit-input {
+            width: 100%;
+            min-width: 400px;
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--syntax-name);
+            font-family: 'Consolas', monospace;
+            font-size: 1em;
+            padding: 2px 4px;
+            box-sizing: border-box;
+        }
+
+        .namemap-edit-input:focus {
+            border: 1px solid var(--selection);
+            background: var(--bg-dark);
+            outline: none;
+        }
+
+        tr:nth-child(even) {
+            background-color: var(--hover);
+        }
+
+        tr.active-row {
+            background-color: var(--selection) !important;
+        }
+
+        tr.active-row td {
+            background-color: var(--selection);
+            color: white;
+        }
+
+        tr.active-row:nth-child(even) {
+            background-color: var(--selection) !important;
+        }
+
+        .col-idx {
+            width: 50px;
+            text-align: center;
+            color: var(--text-dim);
+        }
+
+        .col-name {
+            min-width: 300px;
+            max-width: none;
+            color: var(--syntax-name);
+        }
+
+        .col-type {
+            width: 140px;
+            min-width: 100px;
+            color: var(--syntax-type);
+        }
+
+        .col-variant {
+            width: 100px;
+            min-width: 80px;
+            color: var(--syntax-variant);
+        }
+
+        .col-val {
+            color: var(--syntax-val);
+        }
+
+        /* Universal Syntax Highlighting via tr attribute */
+        tr[data-type="FloatProperty"] .col-val {
+            color: var(--syntax-float) !important;
+        }
+
+        tr[data-type="ObjectProperty"] .col-val {
+            color: var(--syntax-object) !important;
+            text-decoration: underline;
+            text-underline-offset: 3px;
+        }
+
+        tr[data-type="BoolProperty"] .col-val {
+            color: var(--syntax-bool) !important;
+            font-weight: bold;
+        }
+
+        tr[data-type="StrProperty"] .col-val {
+            color: var(--syntax-str) !important;
+        }
+
+        .col-val input,
+        .col-variant input {
+            width: 100%;
+            background-color: var(--bg-dark);
+            color: #ce9178;
+            border: 1px solid var(--border-color);
+            padding: 4px 6px;
+            font-family: 'Consolas', monospace;
+            font-size: 1em;
+            min-height: 32px;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .col-val input:focus,
+        .col-variant input:focus {
+            outline: 2px solid var(--selection);
+            border-color: var(--selection);
+        }
+
+        .col-val input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            min-width: 16px;
+            min-height: 16px;
+            max-width: 16px;
+            max-height: 16px;
+            padding: 0;
+            margin: 0;
+            cursor: pointer;
+            vertical-align: middle;
+            accent-color: #e67e22;
+            -webkit-tap-highlight-color: transparent;
+            transform: none;
+            flex-shrink: 0;
+        }
+
+        .col-variant input {
+            color: #b5cea8;
+        }
+
+        .col-variant input:disabled {
+            background-color: var(--bg-sidebar);
+            color: var(--text-dim);
+            cursor: not-allowed;
+        }
+
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            z-index: 999;
+        }
+
+        @media screen and (max-width: 1024px) {
+            body {
+                font-size: 13px;
+            }
+
+            .menu-toggle {
+                display: flex;
+                min-height: 44px;
+                min-width: 44px;
+            }
+
+            .sidebar {
+                position: fixed;
+                top: 0;
+                left: 0;
+                bottom: 0;
+                width: 100%;
+                max-width: 320px;
+                z-index: 999;
+                transform: translateX(-100%);
+                box-shadow: 2px 0 8px rgba(0, 0, 0, 0.3);
+            }
+
+            .sidebar.open {
+                transform: translateX(0);
+            }
+
+            .toolbar {
+                min-height: 44px;
+                padding: 6px 8px;
+                flex-wrap: nowrap;
+                justify-content: space-between;
+            }
+
+            .toolbar-left {
+                gap: 6px;
+            }
+
+            .toolbar-right {
+                gap: 6px;
+            }
+
+            .file-btn,
+            .save-btn {
+                font-size: 13px;
+                padding: 6px 12px;
+                min-height: 36px;
+            }
+
+            .file-info {
+                display: none;
+            }
+
+            table {
+                font-size: 1em;
+            }
+
+            th {
+                padding: 6px 8px;
+                font-size: 1em;
+            }
+
+            td {
+                padding: 4px 6px;
+                font-size: 1em;
+            }
+
+            .col-val input,
+            .col-variant input {
+                font-size: 1em;
+                padding: 4px 6px;
+                min-height: 28px;
+            }
+
+            .col-val input[type="text"],
+            .col-val input[type="number"],
+            .col-variant input[type="text"],
+            .col-variant input[type="number"] {
+                width: 100%;
+                font-size: 1em;
+            }
+
+            .col-val input[type="checkbox"] {
+                width: 16px;
+                height: 16px;
+                min-width: 16px;
+                min-height: 16px;
+                max-width: 16px;
+                max-height: 16px;
+                padding: 0;
+                margin: 0;
+                vertical-align: middle;
+                accent-color: #e67e22;
+            }
+
+            .node-content {
+                padding: 5px 6px;
+                font-size: 13px;
+                min-height: 36px;
+            }
+
+            .toggle-box {
+                width: 22px;
+                height: 22px;
+                min-width: 22px;
+                min-height: 22px;
+                font-size: 14px;
+                margin-right: 6px;
+            }
+
+            .node-icon {
+                width: 18px;
+                font-size: 14px;
+                margin-right: 5px;
+            }
+
+            .col-idx {
+                width: 50px;
+            }
+
+            .col-name {
+                width: 180px;
+                min-width: 100px;
+            }
+
+            .col-type {
+                width: 110px;
+                min-width: 80px;
+            }
+
+            .col-variant {
+                width: 90px;
+                min-width: 60px;
+            }
+        }
+
+        @media screen and (min-width: 769px) and (max-width: 1024px) {
+            .sidebar {
+                width: 280px;
+            }
+
+            .col-val input,
+            .col-variant input {
+                font-size: 1em;
+                padding: 6px 4px;
+                min-height: 40px;
+            }
+
+            .node-content {
+                padding: 10px 4px;
+                min-height: 40px;
+            }
+
+            .toggle-box {
+                width: 24px;
+                height: 24px;
+                min-width: 24px;
+                min-height: 24px;
+                font-size: 14px;
+            }
+        }
+
+        @media (hover: none) and (pointer: coarse) {
+            .node-content:hover {
+                background-color: transparent;
+            }
+
+            .toggle-box:hover {
+                border-color: #999;
+                color: #ccc;
+            }
+
+            .file-btn:hover {
+                background: var(--btn-bg);
+            }
+
+            .save-btn:hover {
+                background-color: var(--btn-save);
+            }
+        }
+
+        /* Settings Modal Styles - UPGRADED */
+        .settings-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+
+        .settings-overlay.show {
+            display: flex;
+        }
+
+        .settings-modal {
+            background-color: var(--bg-sidebar);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 0;
+            max-width: 400px;
+            width: 90%;
+            max-height: 85vh;
+            overflow: hidden;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.4);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .settings-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .settings-header h2 {
+            margin: 0;
+            color: var(--text-main);
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .settings-close {
+            background: transparent;
+            border: none;
+            color: var(--text-dim);
+            cursor: pointer;
+            padding: 4px;
+            display: flex;
+            border-radius: 4px;
+        }
+
+        .settings-close:active {
+            background: var(--hover);
+        }
+
+        .settings-content {
+            padding: 12px 0;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .settings-section {
+            padding: 0 0 12px 0;
+            margin-bottom: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .settings-section:last-child {
+            border-bottom: none;
+        }
+
+        .settings-section-title {
+            padding: 8px 20px;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--selection);
+            font-weight: 700;
+        }
+
+        .settings-row {
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            min-height: 48px;
+            transition: background 0.2s;
+        }
+
+        .settings-row:active {
+            background: var(--hover);
+        }
+
+        .settings-label {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .settings-title {
+            font-size: 14px;
+            color: var(--text-main);
+        }
+
+        .settings-desc {
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+
+        /* Modern Toggle Switch */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 22px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #333;
+            transition: .3s;
+            border-radius: 22px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .3s;
+            border-radius: 50%;
+        }
+
+        input:checked+.slider {
+            background-color: var(--selection);
+        }
+
+        input:checked+.slider:before {
+            transform: translateX(18px);
+        }
+
+        .zoom-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--bg-dark);
+            padding: 4px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+        }
+
+        .zoom-btn {
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border: none;
+            color: var(--text-main);
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+
+        .zoom-btn:active:not(:disabled) {
+            background: var(--hover);
+        }
+
+        .zoom-btn:disabled {
+            opacity: 0.3;
+        }
+
+        .zoom-value {
+            min-width: 24px;
+            text-align: center;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .settings-select {
+            background: var(--bg-dark);
+            color: var(--text-main);
+            border: 1px solid var(--border-color);
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 13px;
+            outline: none;
+        }
+
+        .settings-action-btn {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            padding: 12px 20px;
+            border: none;
+            background: transparent;
+            color: var(--text-main);
+            font-size: 14px;
+            cursor: pointer;
+            text-align: left;
+            transition: background 0.2s;
+        }
+
+        .settings-action-btn:active {
+            background: var(--hover);
+        }
+
+        .settings-action-btn svg {
+            width: 18px;
+            height: 18px;
+            color: var(--text-dim);
+        }
+
+        .settings-action-btn + .settings-action-btn {
+            margin-top: 8px;
+        }
+
+        .hp-author-gap {
+            height: 10px;
+        }
+
+        /* 作者信息（一键制作下方） */
+        .hp-author {
+            padding: 2px 20px 12px;
+        }
+
+        .hp-author-row {
+            display: flex;
+            align-items: baseline;
+            gap: 10px;
+            font-size: 13px;
+            line-height: 1.9;
+        }
+
+        .hp-author-row>span {
+            flex: none;
+            width: 74px;
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+
+        .hp-author-row b {
+            font-weight: 600;
+            color: var(--text-main);
+        }
+
+        .hp-author-link {
+            color: var(--selection);
+            text-decoration: none;
+            word-break: break-all;
+        }
+
+        .hp-author-link:active {
+            opacity: .6;
+        }
+
+        .table-header-tools {
+            display: none;
+        }
+
+        /* Light Theme Fixes */
+        body.light-theme .settings-modal {
+            background: #fff;
+        }
+
+        body.light-theme .settings-header {
+            border-bottom-color: #eee;
+        }
+
+        body.light-theme .settings-row:active {
+            background: #f5f5f5;
+        }
+
+        body.light-theme .settings-section {
+            border-bottom-color: #eee;
+        }
+
+        body.light-theme .zoom-control {
+            background: #f9f9f9;
+            border-color: #ddd;
+        }
+
+        body.light-theme .slider {
+            background-color: #e0e0e0;
+        }
+
+        body.light-theme input:checked+.slider {
+            background-color: var(--selection);
+        }
+
+        body.light-theme .settings-select {
+            background: #fff;
+            border-color: #ddd;
+        }
+
+        body.light-theme .settings-action-btn:active {
+            background: #f5f5f5;
+        }
+
+        /* Read-only box styling (for ObjectProperty display) */
+        .read-only-box {
+            background: #1e1e1e;
+            color: #ce9178;
+            border: 1px solid #333;
+        }
+
+        /* Zoom/Scale support */
+        :root {
+            --base-font-size: 13px;
+            --zoom-scale: 1;
+        }
+
+        body {
+            font-size: calc(var(--base-font-size) * var(--zoom-scale));
+        }
+
+        /* ============================================
+           LIGHT THEME - COMPLETE STANDALONE CONFIGURATION
+           All colors explicitly defined - no inheritance from dark theme
+           ============================================ */
+        body.light-theme {
+            /* CSS Variables for Light Theme */
+            --bg-dark: #ffffff;
+            --bg-sidebar: #f3f3f3;
+            --bg-header: #e8e8e8;
+            --border-color: #d0d0d0;
+            --text-main: #1e1e1e;
+            --text-dim: #5a5a5a;
+            --selection: #007acc;
+            --hover: #e0e0e0;
+        }
+
+        /* Body and containers */
+        body.light-theme {
+            background-color: #ffffff !important;
+            color: #1e1e1e !important;
+        }
+
+        /* Toolbar */
+        body.light-theme .toolbar {
+            background-color: #e8e8e8 !important;
+            border-bottom-color: #d0d0d0 !important;
+        }
+
+        body.light-theme .file-info {
+            color: #5a5a5a !important;
+        }
+
+        /* Sidebar */
+        body.light-theme .sidebar {
+            background-color: #f3f3f3 !important;
+            border-right-color: #d0d0d0 !important;
+        }
+
+        /* Content area */
+        body.light-theme .content {
+            background-color: #ffffff !important;
+        }
+
+        /* Table styling */
+        body.light-theme th {
+            background-color: #e8e8e8 !important;
+            border-color: #d0d0d0 !important;
+            color: #1e1e1e !important;
+        }
+
+        body.light-theme td {
+            border-color: #d0d0d0 !important;
+            color: #1e1e1e !important;
+        }
+
+        body.light-theme tr:nth-child(even) {
+            background-color: #f8f8f8 !important;
+        }
+
+        /* Column colors */
+        body.light-theme .col-idx {
+            color: #5a5a5a !important;
+        }
+
+        body.light-theme .col-name {
+            color: #1e4d72 !important;
+        }
+
+        body.light-theme .col-type {
+            color: #0d7377 !important;
+        }
+
+        body.light-theme .col-variant {
+            color: #5a7c47 !important;
+        }
+
+        body.light-theme .col-val {
+            color: #8b4513 !important;
+        }
+
+        /* Input fields - ALL must be white background with black text */
+        body.light-theme .col-val input,
+        body.light-theme .col-variant input {
+            background-color: #ffffff !important;
+            color: #000000 !important;
+            border-color: #d0d0d0 !important;
+        }
+
+        body.light-theme .col-val input[type="text"],
+        body.light-theme .col-val input[type="number"],
+        body.light-theme .col-variant input[type="text"],
+        body.light-theme .col-variant input[type="number"] {
+            background-color: #ffffff !important;
+            color: #000000 !important;
+        }
+
+        body.light-theme .col-val input[type="checkbox"] {
+            accent-color: #e67e22;
+        }
+
+        body.light-theme .col-variant input:disabled {
+            background-color: #f3f3f3 !important;
+            color: #5a5a5a !important;
+        }
+
+        /* CRITICAL FIX: Active row - ALL text must be BLACK */
+        body.light-theme tr.active-row,
+        body.light-theme tr.active-row td,
+        body.light-theme tr.active-row th,
+        body.light-theme tr.active-row .col-name,
+        body.light-theme tr.active-row .col-type,
+        body.light-theme tr.active-row .col-variant,
+        body.light-theme tr.active-row .col-val,
+        body.light-theme tr.active-row .col-idx,
+        body.light-theme tr.active-row input,
+        body.light-theme tr.active-row .caret {
+            background-color: #b3d9f2 !important;
+            color: #000000 !important;
+        }
+
+        /* Node content (sidebar tree) */
+        body.light-theme .node-content {
+            color: #1e1e1e !important;
+        }
+
+        body.light-theme .node-content:active {
+            background-color: #e0e0e0 !important;
+        }
+
+        body.light-theme .node-content.selected {
+            background-color: #007acc !important;
+            color: #ffffff !important;
+        }
+
+        /* Toggle box */
+        body.light-theme .toggle-box {
+            border-color: #d0d0d0 !important;
+            background-color: #f3f3f3 !important;
+            color: #1e1e1e !important;
+        }
+
+        body.light-theme .toggle-box:active {
+            border-color: #1e1e1e !important;
+            color: #1e1e1e !important;
+            background-color: #e0e0e0 !important;
+        }
+
+        /* Nested group */
+        body.light-theme .nested-group {
+            border-left-color: #d0d0d0 !important;
+        }
+
+        /* Settings modal */
+        body.light-theme .settings-modal {
+            background-color: #f3f3f3 !important;
+            border-color: #d0d0d0 !important;
+        }
+
+        body.light-theme .settings-modal h2 {
+            color: #1e1e1e !important;
+        }
+
+        body.light-theme .settings-item label {
+            color: #1e1e1e !important;
+        }
+
+        body.light-theme .zoom-value {
+            color: #1e1e1e !important;
+        }
+
+        /* Read-only box (ObjectProperty display) */
+        body.light-theme .read-only-box {
+            background: #ffffff !important;
+            color: #8b4513 !important;
+            border-color: #d0d0d0 !important;
+        }
+
+        /* Loading overlay */
+        body.light-theme .loading-overlay {
+            background: rgba(0, 0, 0, 0.5) !important;
+            color: #ffffff !important;
+        }
+
+        /* About Modal Styles */
+        .about-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.4);
+            z-index: 1100;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .about-overlay.show {
+            display: flex;
+        }
+
+        .about-modal {
+            background-color: var(--bg-sidebar);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 24px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 85vh;
+            overflow-y: auto;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .about-modal h2 {
+            margin: 0 0 20px 0;
+            color: var(--text-main);
+            font-size: 18px;
+            font-weight: 700;
+            text-align: center;
+        }
+
+        .about-description {
+            margin: 0 0 24px 0;
+            color: var(--text-main);
+            font-size: 14px;
+            line-height: 1.6;
+            text-align: center;
+        }
+
+        .about-divider {
+            margin: 24px 0;
+            color: var(--text-dim);
+            font-size: 11px;
+            text-align: center;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        .about-links {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .about-link {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            background-color: var(--bg-dark);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            text-decoration: none;
+            color: var(--text-main);
+            font-size: 14px;
+            min-height: 48px;
+            transition: background-color 0.2s ease;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .about-link:active {
+            background-color: var(--hover);
+        }
+
+        .about-link-icon {
+            width: 24px;
+            height: 24px;
+            flex-shrink: 0;
+            color: var(--text-main);
+        }
+
+        .about-link-text {
+            flex: 1;
+            font-weight: 500;
+        }
+
+        /* Light Theme - About Modal */
+        body.light-theme .about-modal {
+            background-color: #f3f3f3 !important;
+            border-color: #d0d0d0 !important;
+        }
+
+        body.light-theme .about-modal h2 {
+            color: #1e1e1e !important;
+        }
+
+        body.light-theme .about-description {
+            color: #5a5a5a !important;
+        }
+
+        body.light-theme .about-divider {
+            color: #999999 !important;
+        }
+
+        body.light-theme .about-link {
+            background-color: #ffffff !important;
+            border-color: #d0d0d0 !important;
+            color: #1e1e1e !important;
+        }
+
+        body.light-theme .about-link:active {
+            background-color: #e0e0e0 !important;
+        }
+
+        body.light-theme .about-link-icon {
+            color: #1e1e1e !important;
+        }
+
+        .button {
+            padding: 12px 20px;
+            border: none;
+            outline: none;
+            background-color: #151515;
+            color: #eee;
+            border-radius: 7px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.25s ease-out;
+            -webkit-tap-highlight-color: transparent;
+            margin-top: -150px;
+            margin-bottom: 0;
+            min-height: 40px;
+            min-width: 200px;
+            position: relative;
+            z-index: 10;
+        }
+
+        .button:hover {
+            transform: translateY(-3px);
+        }
+
+        .button-span {
+            color: #aaa;
+        }
+
+        .new-badge {
+            background-color: #ff4757;
+            color: white;
+            font-weight: bold;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-right: 5px;
+            font-size: 0.8em;
+            display: inline-block;
+        }
+
+        .top-badge {
+            background-color: #ff4757;
+            color: white;
+            font-weight: bold;
+            padding: 5px 10px;
+            border-radius: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            font-size: 14px;
+            white-space: nowrap;
+            margin-bottom: 15px;
+            text-align: center;
+            min-height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Themes - Fully Overhauled */
+        body.light-theme {
+            --bg-dark: #ffffff;
+            --bg-sidebar: #f3f3f3;
+            --bg-header: #f8f8f8;
+            --border-color: #e5e5e5;
+            --text-main: #333333;
+            --text-dim: #777777;
+            --selection: #007acc;
+            --hover: #e8e8e8;
+            --btn-bg: #d8d8d8;
+            /* Darkened from #efefef */
+            --btn-save: #2ea44f;
+            --btn-save-border: #22863a;
+            --syntax-name: #001080;
+            --syntax-type: #267f99;
+            --syntax-variant: #008000;
+            --syntax-val: #a31515;
+            --syntax-float: #098658;
+            --syntax-object: #001080;
+            --syntax-bool: #0000ff;
+            --syntax-str: #a31515;
+        }
+
+        body.light-theme .file-btn {
+            border-color: #bbb !important;
+        }
+
+
+        body.light-theme .file-btn:active {
+            background: var(--btn-bg) !important;
+            color: var(--text-main) !important;
+            transition: none !important;
+            transform: none !important;
+        }
+
+
+        /* Font Styles */
+        body.font-retro {
+            font-family: 'Consolas', 'Monaco', monospace;
+        }
+
+        body.font-modern {
+            font-family: 'Inter', sans-serif, system-ui;
+        }
+
+        /* Sidebar Minimalist */
+        body.hide-icons .node-icon {
+            display: none;
+        }
+
+        /* Type Highlighting */
+        body.type-coloring .col-name {
+            color: var(--syntax-name);
+        }
+
+        body.type-coloring .col-type {
+            color: var(--syntax-type);
+        }
+
+        body.type-coloring .col-variant {
+            color: var(--syntax-variant);
+        }
+
+        body.type-coloring .col-val {
+            color: var(--syntax-val);
+        }
+
+        body.type-coloring .col-val[data-type="BoolProperty"] {
+            color: var(--syntax-bool) !important;
+            font-weight: bold;
+        }
+
+        body.type-coloring .col-val[data-type="FloatProperty"] {
+            color: var(--syntax-float) !important;
+        }
+
+        body.type-coloring .col-val[data-type="IntProperty"] {
+            color: var(--syntax-val) !important;
+            /* Use general value color or specific if defined */
+        }
+
+        body.type-coloring .col-val[data-type="StrProperty"] {
+            color: var(--syntax-str) !important;
+        }
+
+        body.type-coloring .col-val[data-type="ObjectProperty"] {
+            color: var(--syntax-object) !important;
+        }
+
+        /* Animation Management */
+        body.no-animations * {
+            transition: none !important;
+            animation: none !important;
+        }
+
+
+        /* Search Bars */
+        .search-container {
+            padding: 12px;
+            background: var(--bg-sidebar);
+            border-bottom: 1px solid var(--border-color);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .tree-actions {
+            display: flex;
+            gap: 5px;
+            padding: 5px 12px;
+            background: var(--bg-sidebar);
+            border-bottom: 1px solid var(--border-color);
+            z-index: 99;
+        }
+
+        .search-input {
+            width: 100%;
+            background: var(--bg-dark);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            outline: none;
+        }
+
+        .search-input:focus {
+            border-color: var(--selection);
+        }
+
+        .table-header-tools {
+            display: none;
+            /* Hidden until export selected */
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            background: var(--bg-header);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+
+        .action-icon-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-dim);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            white-space: nowrap;
+        }
+
+        .action-icon-btn:active {
+            color: var(--text-main);
+            background: var(--hover);
+        }
+
+        .action-icon-btn svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        /* Compact Mode Support */
+        body.compact-mode .node-content {
+            min-height: 28px;
+            padding: 2px 4px;
+        }
+
+        body.compact-mode td {
+            padding: 2px 6px;
+        }
+
+        body.compact-mode .col-val input,
+        body.compact-mode .col-variant input {
+            min-height: 24px;
+            padding: 2px 4px;
+        }
+
+        /* Spotlight transition element (to make it move smoothly) */
+        #tour-mask-rect {
+            transition: all 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+
+        /* ============================================
+           NAME MAP NODE (Special styling in sidebar)
+           ============================================ */
+        .namemap-node .toggle-box {
+            visibility: hidden;
+            width: 0;
+            min-width: 0;
+            margin-right: 0;
+        }
+
+        .namemap-node .node-icon {
+            display: none;
+        }
+    </style>
+<style>
+#authorModal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:99999}
+#authorModal.show{display:flex}
+#authorModal .acard{background:#fff;color:#222;border-radius:16px;padding:22px 26px;min-width:260px;box-shadow:0 18px 50px rgba(0,0,0,.3);text-align:center;font-family:inherit}
+#authorModal h3{margin:0 0 14px;font-size:17px;letter-spacing:1px;color:#111}
+</style>
+<style>
+#authorModal .arow{margin:9px 0;font-size:15px;color:#333}
+#authorModal .aok{margin-top:16px;width:100%;border:0;border-radius:10px;padding:11px 0;font-size:15px;background:#2b7fff;color:#fff;font-weight:600}
+[data-theme="dark"] #authorModal .acard{background:#1c2026;color:#e6e8ec}
+[data-theme="dark"] #authorModal h3{color:#fff}
+[data-theme="dark"] #authorModal .arow{color:#cfd4dc}
+</style>
+</head>
+
+<body>
+    <div class="loading-overlay" id="loadingOverlay">正在载入文件…</div>
+
+    <div class="toolbar">
+        <div class="toolbar-left">
+            <button class="menu-toggle" id="menuToggle" aria-label="Toggle sidebar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="3" y1="6" x2="21" y2="6"></line>
+                    <line x1="3" y1="12" x2="21" y2="12"></line>
+                    <line x1="3" y1="18" x2="21" y2="18"></line>
+                </svg>
+            </button>
+            <button class="menu-toggle" id="settingsToggle" aria-label="Settings">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                    stroke-linejoin="round">
+                    <path
+                        d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z">
+                    </path>
+                    <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+            </button>
+            <div id="historyGroup">
+                <button class="history-btn" id="undoBtn" aria-label="Undo" disabled>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                        stroke-linejoin="round">
+                        <path d="M3 7v6h6"></path>
+                        <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path>
+                    </svg>
+                </button>
+                <button class="history-btn" id="redoBtn" aria-label="Redo" disabled>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                        stroke-linejoin="round">
+                        <path d="M21 7v6h-6"></path>
+                        <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+        <div class="toolbar-spacer"></div>
+        <div class="toolbar-right">
+            <button class="file-btn" id="openBtn">打开</button>
+            <button class="save-btn" id="saveBtn" disabled>保存</button>
+        </div>
+        <span class="file-info" id="fileInfo">未选择文件</span>
+        <input type="file" id="fileInput" multiple accept="*/*" style="display:none">
+    </div>
+
+    <div class="main-container">
+        <div class="sidebar-overlay" id="sidebarOverlay"></div>
+        <div class="sidebar" id="sidebar">
+            <div class="search-container">
+                <input type="text" id="sidebarSearch" class="search-input" placeholder="Search...">
+            </div>
+            <div class="tree-actions">
+                <button class="action-icon-btn" id="expandAll">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+                    </svg>
+                    全部展开
+                </button>
+                <button class="action-icon-btn" id="collapseAll">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7" />
+                    </svg>
+                    全部折叠
+                </button>
+                <button class="action-icon-btn" id="zhToggle" title="把英文属性名翻成中文">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M4 5h10M9 3v2c0 4-3 7-6 8M5 12c2 3 4 5 7 6M14 20l4-10 4 10M15.5 17h5" />
+                    </svg>
+                    翻译
+                </button>
+            </div>
+            <ul id="treeRoot"></ul>
+        </div>
+
+
+        <div class="content">
+            <div class="table-header-tools">
+                <input type="text" id="propertySearch" class="search-input"
+                    placeholder="Filter properties in this export...">
+            </div>
+            <div class="table-wrapper">
+                <table id="propertyTable">
+                    <thead>
+                        <tr>
+                            <th class="col-idx">#</th>
+                            <th class="col-name">名称</th>
+                            <th class="col-type">类型</th>
+                            <th class="col-variant">子项</th>
+                            <th class="col-val">数值</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Upgraded Settings Modal -->
+    <div class="settings-overlay" id="settingsOverlay">
+        <div class="settings-modal">
+            <div class="settings-header">
+                <h2>设置</h2>
+                <button class="settings-close" id="settingsClose">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+
+            <div class="settings-content">
+                <!-- APPEARANCE -->
+                <div class="settings-section">
+                    <div class="settings-section-title">配色</div>
+                    <div class="settings-row" id="rowTheme">
+                        <div class="settings-label">
+                            <span class="settings-title">主题方案</span>
+                            <span class="settings-desc">全局配色</span>
+                        </div>
+                        <select class="settings-select" id="themePreset">
+                            <option value="dark">标准深色</option>
+                            <option value="light">纯白</option>
+                        </select>
+                    </div>
+
+                    <div class="settings-row" id="rowZoom">
+                        <div class="settings-label">
+                            <span class="settings-title">缩放</span>
+                            <span class="settings-desc">调整界面文字大小</span>
+                        </div>
+                        <div class="zoom-control">
+                            <button class="zoom-btn" id="zoomMinus">-</button>
+                            <span class="zoom-value" id="zoomValue">0</span>
+                            <button class="zoom-btn" id="zoomPlus">+</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TABLE & SIDEBAR -->
+                <div class="settings-section">
+                    <div class="settings-section-title">界面</div>
+                    <div class="settings-row" id="rowIcons">
+                        <div class="settings-label">
+                            <span class="settings-title">简洁侧栏</span>
+                            <span class="settings-desc">隐藏节点图标，界面更清爽</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="hideIconsToggle">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="settings-row" id="rowAnim">
+                        <div class="settings-label">
+                            <span class="settings-title">平滑动画</span>
+                            <span class="settings-desc">关闭可提升性能</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="animToggle" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+
+                    <!-- PREFERENCES -->
+                    <div class="settings-section">
+                        <div class="settings-section-title">操作习惯</div>
+                        <div class="settings-row" id="rowCompact">
+                            <div class="settings-label">
+                                <span class="settings-title">紧凑模式</span>
+                                <span class="settings-desc">更紧凑的排版，显示更多数据</span>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="compactModeToggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+
+                        <div class="settings-row" id="rowSort">
+                            <div class="settings-label">
+                                <span class="settings-title">排序方式</span>
+                                <span class="settings-desc">属性排列顺序</span>
+                            </div>
+                            <select class="settings-select" id="sortOrder">
+                                <option value="original">原始顺序</option>
+                                <option value="alphabetical">字母顺序</option>
+                                <option value="type">按类型</option>
+                            </select>
+                        </div>
+
+                        <div class="settings-row" id="rowModified">
+                            <div class="settings-label">
+                                <span class="settings-title">只看改动</span>
+                                <span class="settings-desc">隐藏未修改的属性</span>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="modifiedOnlyToggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- 一键制作 -->
+                    <div class="settings-section">
+                        <div class="settings-section-title">和平精英</div>
+                        <button class="settings-action-btn" data-hp-set="single">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                stroke-linecap="round">
+                                <circle cx="12" cy="12" r="9"></circle>
+                                <circle cx="12" cy="12" r="2.5"></circle>
+                                <line x1="12" y1="1.5" x2="12" y2="4.5"></line>
+                                <line x1="12" y1="19.5" x2="12" y2="22.5"></line>
+                                <line x1="1.5" y1="12" x2="4.5" y2="12"></line>
+                                <line x1="19.5" y1="12" x2="22.5" y2="12"></line>
+                            </svg>
+                            <span>单内透</span>
+                        </button>
+
+                        <button class="settings-action-btn" data-hp-set="cover">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                stroke-linecap="round">
+                                <path d="M12 2.6 20 6v6.4c0 4.4-3.4 7.6-8 9-4.6-1.4-8-4.6-8-9V6z"></path>
+                                <path d="M12 8v5"></path>
+                                <path d="M12 16.4h.01"></path>
+                            </svg>
+                            <span>掩体分辨内透</span>
+                        </button>
+
+                        <button class="settings-action-btn" data-hp-set="gun">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                stroke-linecap="round">
+                                <path d="M3 10h11l3-3h4v3h-2v3h-4l-2 2H9v5H6v-5H3z"></path>
+                                <line x1="17" y1="10" x2="17" y2="8"></line>
+                            </svg>
+                            <span>枪械功能</span>
+                        </button>
+
+                        <button class="settings-action-btn" data-hp-set="key">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                stroke-linecap="round">
+                                <circle cx="8" cy="8" r="4"></circle>
+                                <path d="M11 11l8 8"></path>
+                                <path d="M16 16l3-3"></path>
+                            </svg>
+                            <span>密钥内透</span>
+                        </button>
+
+                        <div class="hp-author-gap"></div>
+
+                        <div class="settings-section-title" style="margin-top: 6px;">三角洲</div>
+                        <button class="settings-action-btn" data-hp-set="range">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                                <circle cx="12" cy="12" r="8"></circle>
+                                <circle cx="12" cy="12" r="2"></circle>
+                                <line x1="12" y1="2" x2="12" y2="5"></line>
+                                <line x1="12" y1="19" x2="12" y2="22"></line>
+                                <line x1="2" y1="12" x2="5" y2="12"></line>
+                                <line x1="19" y1="12" x2="22" y2="12"></line>
+                            </svg>
+                            <span>范围</span>
+                        </button>
+                        <button class="settings-action-btn" data-hp-set="norecoil">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                                <path d="M3 12h6l2-4 2 8 2-4h6"></path>
+                            </svg>
+                            <span>无后</span>
+                        </button>
+
+                        <div class="hp-author">
+                            <div class="hp-author-row"><span>作者</span><b>小豆</b></div>
+                            <div class="hp-author-row"><span>Telegram</span><a class="hp-author-link" data-tg="xmdnb8">@xmdnb8</a></div>
+                            <div class="hp-author-row"><span>TG 群</span><a class="hp-author-link" data-tg="xmdnb8">https://t.me/xmdnb8</a></div>
+                        </div>
+                    </div>
+
+                    <div class="settings-section" style="border: none; margin-bottom: 0; display: none;">
+                        <div class="settings-section-title">常规</div>
+                        <button class="settings-action-btn" id="hexEditorBtn">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                <line x1="9" y1="3" x2="9" y2="21"></line>
+                            </svg>
+                            <span>十六进制编辑器</span>
+                        </button>
+                        <button class="settings-action-btn" id="aboutDevBtn" style="margin-bottom: 8px;">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <line x1="12" y1="16" x2="12" y2="12"></line>
+                                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                            </svg>
+                            <span>关于</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- About Modal -->
+    <div class="about-overlay" id="aboutOverlay">
+        <div class="about-modal" style="position: relative;">
+            <button class="settings-close" id="aboutClose" style="position: absolute; top: 12px; right: 12px;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+            <h2>关于</h2>
+
+            <p class="about-description">
+                Sace 是一个手机端的虚幻引擎资源工具，可以直接在安卓上查看、分析和修改编译后的资源文件（.uasset / .uexp），不用电脑。
+                <br><br>
+                <strong>功能：</strong><br>
+                • 支持 UE4 / UE5 各种版本。<br>
+                • 树状结构查看属性。<br>
+                • 实时改值：整数、浮点、布尔、颜色。<br>
+                • 十六进制查看二进制数据。<br>
+                <br>
+                适合随手改数值、做 MOD、手机上直接看资源。
+            </p>
+
+            <div class="about-divider">— TOOLVISION 出品 —</div>
+
+            <div class="about-links">
+                <a href="https://t.me/saceasset" target="_blank" class="about-link">
+                    <svg class="about-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="22" y1="2" x2="11" y2="13"></line>
+                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                    </svg>
+                    <span class="about-link-text">SaceAsset</span>
+                </a>
+
+                <a href="https://youtube.com/@sayretna" target="_blank" class="about-link">
+                    <svg class="about-link-icon" viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+                    </svg>
+                    <span class="about-link-text">Sayretna</span>
+                </a>
+
+                <a href="https://github.com/SaceViewer" target="_blank" class="about-link">
+                    <svg class="about-link-icon" viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+                    </svg>
+                    <span class="about-link-text">Sace</span>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Apply theme from URL parameter if present (for cross-page navigation)
+        try {
+            const params = new URLSearchParams(window.location.search);
+            const urlTheme = params.get('theme');
+            if (urlTheme === 'dark') {
+                document.body.classList.remove('light-theme');
+                localStorage.setItem('theme', 'dark');
+            } else if (urlTheme === 'light') {
+                document.body.classList.add('light-theme');
+                localStorage.setItem('theme', 'light');
+            }
+        } catch (e) { console.error(e); }
+    </script>
+    <script src="app.js"></script>
+
+<script>
+window.__ZH = { on: false, DICT: {
+// 通用 / 结构
+Weapon:"武器", Weapons:"武器", Gun:"枪械", Fire:"开火", Firearm:"枪械", Bullet:"子弹", Shell:"弹壳",
+Recoil:"后坐", Spread:"散布", Accuracy:"精度", Damage:"伤害", Range:"射程", Rate:"速率", Speed:"速度",
+Time:"时间", Id:"编号", Index:"序号", Count:"数量", Num:"数量", Value:"数值", Values:"数值", Default:"默认",
+Min:"最小", Max:"最大", Base:"基础", Add:"附加", Sub:"扣减", Mul:"倍率", Factor:"系数", Multiplier:"倍率",
+Scale:"缩放", Ratio:"比例", Weight:"权重", Offset:"偏移", Angle:"角度", Curve:"曲线", Pattern:"弹道",
+Horizontal:"水平", Vertical:"垂直", Up:"上", Down:"下", Left:"左", Right:"右", Forward:"前", Back:"后",
+Camera:"镜头", Shake:"抖动", Move:"移动", Motion:"运动", Aim:"瞄准", ADS:"开镜", Hip:"腰射", Sprint:"冲刺",
+Walk:"行走", Run:"奔跑", Jump:"跳跃", Crouch:"蹲伏", Prone:"匍匐", Stand:"站立", Idle:"待机",
+Start:"开始", End:"结束", Begin:"起始", Duration:"时长", Delay:"延迟", Cooldown:"冷却", Interval:"间隔",
+Switch:"切换", Reload:"换弹", Clip:"弹匣", Mag:"弹匣", Ammo:"弹药", Capacity:"容量", Cost:"消耗",
+Single:"单发", Burst:"连发", Auto:"全自动", Semi:"半自动", Shoot:"射击", Shot:"射击", Trigger:"扳机",
+Kick:"抬枪", Punch:"冲击", Push:"推力", Pull:"拉力", Rotate:"旋转", Rotation:"旋转", Pitch:"俯仰", Yaw:"偏航", Roll:"翻滚",
+Damping:"阻尼", Spring:"弹性", Stiffness:"刚度", Lerp:"插值", Blend:"混合", Smooth:"平滑", Ease:"缓动", Fade:"淡出", Zoom:"变焦", Bones:"骨骼", Bone:"骨骼", Cone:"锥形", Filter:"过滤", Config:"配置", Array:"数组", Curve:"曲线", Table:"表", Data:"数据", Root:"根", FOV:"视野", ADS:"开镜",
+In:"进入", Out:"退出", On:"开启", Off:"关闭", Enable:"启用", Disable:"禁用", Valid:"有效", Active:"激活",
+// 动作 / 状态
+Death:"死亡", Hit:"命中", Hurt:"受击", Burn:"燃烧", Freeze:"冻结", Stun:"眩晕", Slow:"减速",
+Skill:"技能", Buff:"增益", Debuff:"减益", Effect:"效果", Impact:"命中效果", Explode:"爆炸", Explosion:"爆炸",
+Sound:"音效", Audio:"音频", Voice:"语音", Anim:"动画", Animation:"动画", Montage:"动画蒙太奇",
+Mesh:"模型", Material:"材质", Texture:"贴图", Icon:"图标", Name:"名称", Desc:"描述", Description:"描述",
+Table:"表", DataTable:"数据表", Data:"数据", Config:"配置", Settings:"设置", Param:"参数", Params:"参数",
+Row:"行", Rows:"行", Column:"列", Key:"键", Entry:"条目", List:"列表", Array:"数组", Map:"映射",
+Player:"玩家", Enemy:"敌人", Team:"队伍", Character:"角色", Pawn:"单位", Body:"身体", Head:"头部",
+Limb:"四肢", Arm:"手臂", Leg:"腿", Torso:"躯干", Armor:"护甲", Health:"生命", Shield:"护盾",
+Physics:"物理", Gravity:"重力", Mass:"质量", Friction:"摩擦", Force:"力", Velocity:"速度", Acceleration:"加速度",
+Level:"等级", Rank:"段位", Score:"分数", Exp:"经验", Gold:"金币", Price:"价格", Unlock:"解锁",
+Common:"普通", Rare:"稀有", Epic:"史诗", Legendary:"传说", Quality:"品质", Rarity:"稀有度",
+// 部位 / 配件 / 视角
+Muzzle:"枪口", Grip:"握把", Stock:"枪托", Barrel:"枪管", Scope:"瞄具", Sight:"准星", Magazine:"弹匣",
+Attachment:"配件", Attach:"配件", Slot:"槽位", Mount:"挂点", Rail:"导轨", Laser:"激光", Light:"手电",
+Upper:"上机匣", Lower:"下机匣", Handguard:"护木", Receiver:"机匣", Bolt:"枪机", Breech:"枪膛",
+Bow:"枪弓", BowString:"弓弦", Arrow:"箭矢", Melee:"近战", Grenade:"手雷", Throw:"投掷",
+Camera:"镜头", Bone:"骨骼", Socket:"插槽", Component:"组件", Actor:"对象", Class:"类", Object:"对象",
+Property:"属性", Struct:"结构体", Enum:"枚举", Bool:"布尔", Int:"整数", Float:"浮点", String:"字符串",
+Vector:"向量", Rotator:"旋转体", Transform:"变换", Color:"颜色", LinearColor:"线性颜色", Guid:"标识",
+Level:"关卡", Map:"地图", World:"世界", Scene:"场景", CameraShake:"镜头抖动", PostProcess:"后处理",
+// 资源路径片段
+Game:"游戏", DataTables:"数据表", DataTable:"数据表", Models:"模型", Curve:"曲线", Camera:"镜头",
+DeltaForce:"三角洲", Weapon:"武器", Rifle:"步枪"
+}};
+
+(function () {
+  var D = window.__ZH.DICT, ON = false;
+  var re = /[A-Z]+(?![a-z])|[A-Z][a-z]+|[a-z]+|\d+/g;
+  function tr(s) {
+    if (!ON || !s) return s;
+    if (D[s]) return D[s];
+    return s.replace(/[A-Za-z][A-Za-z0-9]*/g, function (w) {
+      if (D[w]) return D[w];
+      var parts = w.match(re) || [w];
+      var out = [], hit = false;
+      for (var i = 0; i < parts.length; i++) {
+        var p = parts[i], q = D[p];
+        if (q) { out.push(q); hit = true; } else out.push(p);
+      }
+      return hit ? out.join('') : w;
+    });
+  }
+  var SEL = '#propertyTable td.col-name, #propertyTable td.col-type, #propertyTable td.col-variant, tr.namemap-row td:nth-child(2), .node-content > span:last-child, .tree-node-label';
+  function walk() {
+    var nodes = document.querySelectorAll(SEL);
+    for (var i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
+      if (!el.dataset) continue;
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.querySelector('input,textarea')) continue;
+      if (el.dataset.en === undefined) el.dataset.en = el.textContent;
+      var t = el.dataset.en;
+      var nt = tr(t);
+      if (el.textContent !== nt) el.textContent = nt;
+    }
+  }
+  window.__ZH_APPLY = walk;
+  window.__ZH_TOGGLE = function () {
+    ON = !ON; window.__ZH.on = ON;
+    var b = document.getElementById('zhToggle');
+    if (b) b.classList.toggle('on', ON);
+    walk();
+  };
+  new MutationObserver(function () { if (ON) walk(); })
+    .observe(document.body, { childList: true, subtree: true });
+})();
+
+(function () {
+  document.addEventListener('DOMContentLoaded', function () {
+    var btn = document.getElementById('zhToggle');
+    if (btn) btn.addEventListener('click', function () { window.__ZH_TOGGLE(); });
+    var m = document.getElementById('authorModal');
+    var c = document.getElementById('authorClose');
+    if (m) { setTimeout(function () { m.classList.add('show'); }, 120); }
+    if (c) c.addEventListener('click', function () { m.classList.remove('show'); });
+    var t = document.getElementById('authorTg');
+    if (t) t.addEventListener('click', function () {
+      var u = 'https://t.me/XMDNB8';
+      if (window.Android && Android.openUrl) { try { Android.openUrl(u); return; } catch (e) {} }
+      window.open(u, '_blank');
+    });
+  });
+})();
+
+</script>
+<div id="authorModal">
+  <div class="acard">
+    <h3>作 者 信 息</h3>
+    <p class="arow">作者：<b>小豆</b></p>
+    <p class="arow">Telegram：<b id="authorTg" style="color:#2b7fff">@XMDNB8</b></p>
+    <button id="authorClose" class="aok">开 始 使 用</button>
+  </div>
+</div>
+<!-- 原引用 data2.js，该文件在原包中不存在（404 阻塞），已移除 -->
+
+<!-- 原「远程配置门禁」脚本已移除：它会拉取 GitHub 上的 cfg.json，用内置 HMAC 密钥校验后执行远程停用(kill switch)与强制升级。本版本完全离线自托管。 -->
+
+<!-- 原包内嵌的 __HP_VOICE 资源索引表已移除（与资产编辑无关的第三方注入内容） -->
+
+<!-- 原包内嵌的 __HP_ASSET 资源 base64 已移除（约 4MB 第三方注入内容） -->
+
+<!-- 原包内嵌的「和平内透工具」脚本已移除（第三方游戏内透功能，与资产编辑器无关） -->
+
+</body>
+
+</html>

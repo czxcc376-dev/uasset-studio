@@ -1,0 +1,2548 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Hex Editor - Sace</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=Roboto+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary-color: #00796b;
+            --header-color: #00698f;
+            --highlight-bg: #e0f7fa;
+            --highlight-text: #006064;
+            --toolbar-bg: #263238;
+            --offset-color: #757575;
+            --text-color: #000000;
+            --grey-text: #424242;
+            --white: #ffffff;
+        }
+
+
+
+        body {
+            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-size: 14px;
+            background: #f8f9fa;
+            color: var(--text-color);
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body.dark-theme {
+            --primary-color: #00897b;
+            --header-color: #00364d;
+            --highlight-bg: #004d40;
+            --highlight-text: #e0f2f1;
+            --toolbar-bg: #1c262f;
+            --offset-color: #90a4ae;
+            --text-color: #eceff1;
+            --grey-text: #b0bec5;
+            --white: #111827;
+            background: #0f172a;
+        }
+
+        body.dark-theme .tool-section,
+        body.dark-theme .dash-btn,
+        body.dark-theme .sidebar,
+        body.dark-theme .settings-modal,
+        body.dark-theme #customModal {
+            background: #1e293b;
+            border-color: #334155;
+            color: #f1f5f9;
+        }
+
+        body.dark-theme .file-btn,
+        body.dark-theme .save-btn,
+        body.dark-theme .menu-toggle,
+        body.dark-theme .back-btn {
+            box-shadow: none;
+        }
+
+        body.dark-theme input,
+        body.dark-theme select,
+        body.dark-theme textarea {
+            background: #0f172a;
+            color: #f8fafc;
+            border-color: #334155;
+        }
+
+        body.dark-theme .tool-section h3 {
+            color: #38bdf8 !important;
+            /* Brighter blue for headers */
+        }
+
+        body.dark-theme .input-group label {
+            color: #cbd5e1 !important;
+            /* Lighter grey for labels */
+        }
+
+        body.dark-theme #splitFileNameDisplay,
+        body.dark-theme #hashFileNameDisplay,
+        body.dark-theme #diffFileNameA,
+        body.dark-theme #diffFileNameB,
+        body.dark-theme #stringFileNameDisplay,
+        body.dark-theme .file-list {
+            color: #94a3b8 !important;
+            /* Visible grey for file status */
+            background-color: #1e293b !important;
+            border-color: #334155 !important;
+        }
+
+        body.dark-theme .file-item {
+            background-color: #1e293b !important;
+            border-color: #334155 !important;
+            color: #e2e8f0;
+        }
+
+        body.dark-theme .back-btn,
+        body.dark-theme .menu-toggle {
+            background-color: transparent !important;
+            color: #ffffff !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        }
+
+        body.dark-theme .back-btn:hover,
+        body.dark-theme .menu-toggle:hover {
+            background-color: rgba(255, 255, 255, 0.1) !important;
+        }
+
+        /* Header */
+        header {
+            background: var(--header-color);
+            color: var(--white);
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+            height: 56px;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-left: -4px;
+        }
+
+        body.dark-theme .history-btn {
+            color: #e5e7eb !important;
+            opacity: 0.9;
+        }
+
+        body.dark-theme .history-btn:disabled {
+            opacity: 0.3;
+        }
+
+        body.dark-theme .data-inspector {
+            background: #1e293b !important;
+            border-right: 1px solid #334155 !important;
+            box-shadow: 2px 0 10px rgba(0, 0, 0, 0.5);
+        }
+
+        body.dark-theme .data-inspector-header,
+        body.dark-theme .data-inspector-title,
+        body.dark-theme .footer-label {
+            color: #e2e8f0 !important;
+        }
+
+        body.dark-theme .nav-btn {
+            background-color: #0f172a !important;
+            border-color: #334155 !important;
+            color: #e2e8f0 !important;
+        }
+
+        body.dark-theme .data-item {
+            border-bottom: 1px solid #334155 !important;
+        }
+
+        body.dark-theme .data-item:hover {
+            background-color: #334155 !important;
+        }
+
+        body.dark-theme .data-label {
+            color: #94a3b8 !important;
+        }
+
+        body.dark-theme .data-value {
+            color: #e2e8f0 !important;
+        }
+
+        /* Container Fixes for Dark Theme */
+        body.dark-theme #entropyCanvasContainer,
+        body.dark-theme #sigResultList,
+        body.dark-theme #b64Result,
+        body.dark-theme #b64Input {
+            background-color: #0f172a !important;
+            border-color: #334155 !important;
+            color: #e2e8f0 !important;
+        }
+
+        body.dark-theme #diffResults h3 {
+            background-color: #1e293b !important;
+            border-bottom-color: #334155 !important;
+            color: #e2e8f0 !important;
+        }
+
+        body.dark-theme .diff-result-item {
+            background-color: #1e293b !important;
+            border-bottom-color: #334155 !important;
+        }
+
+        body.dark-theme .diff-box {
+            background-color: #0f172a !important;
+            border-color: #334155 !important;
+        }
+
+        body.dark-theme .diff-box .diff-hex {
+            color: #e2e8f0 !important;
+        }
+
+        body.dark-theme .diff-box .diff-ascii {
+            color: #94a3b8 !important;
+        }
+
+        body.dark-theme .diff-header {
+            color: #94a3b8 !important;
+            border-bottom-color: #334155 !important;
+        }
+
+        body.dark-theme .diff-box.a {
+            border-left-color: #ef5350 !important;
+        }
+
+        body.dark-theme .diff-box.b {
+            border-left-color: #66bb6a !important;
+        }
+
+        body.dark-theme p,
+        body.dark-theme label,
+        body.dark-theme .modal-message {
+            color: #cbd5e1 !important;
+        }
+
+        body.dark-theme #entropyFileNameDisplay,
+        body.dark-theme #sigFileNameDisplay {
+            color: #94a3b8 !important;
+            background-color: #1e293b !important;
+        }
+
+        body.dark-theme #entropyPlaceholder,
+        body.dark-theme #sigPlaceholder {
+            color: #64748b !important;
+        }
+
+        body.dark-theme .hex-row {
+            min-height: 24px !important;
+            /* Increased from 18px */
+            line-height: 24px !important;
+            font-size: 13px !important;
+            /* Increased from 11px */
+        }
+
+        body.dark-theme .hex-byte,
+        body.dark-theme .ascii-char {
+            font-size: 13px !important;
+            padding: 0 4px !important;
+            /* visual breathing room */
+        }
+
+        body.dark-theme .offset-column {
+            color: #64748b !important;
+            /* slate-500 */
+            font-size: 12px !important;
+            padding-top: 1px;
+        }
+
+        body.dark-theme .ascii-column {
+            color: #94a3b8 !important;
+            /* slate-400 */
+        }
+
+        /* Header */
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-right: -4px;
+        }
+
+        .back-btn {
+            background: #0078a8;
+            color: white;
+            border: none;
+            padding: 0;
+            cursor: pointer;
+            font-size: 16px;
+            min-height: 36px;
+            min-width: 36px;
+            height: 36px;
+            width: 36px;
+            display: flex;
+            /* Always visible */
+            align-items: center;
+            justify-content: center;
+            -webkit-tap-highlight-color: transparent;
+            border-radius: 2px;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+        }
+
+        /* body.file-loaded .back-btn not needed as it's always flex */
+
+        .back-btn:active {
+            background-color: #00698f;
+            box-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
+        }
+
+        .back-btn svg {
+            width: 18px;
+            height: 18px;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 2;
+        }
+
+        .history-btn {
+            background: transparent;
+            border: none;
+            padding: 0;
+            cursor: pointer;
+            width: 36px;
+            height: 36px;
+            min-width: 36px;
+            min-height: 36px;
+            display: none;
+            /* Hidden on start */
+            align-items: center;
+            justify-content: center;
+            color: var(--white);
+            opacity: 0.3;
+            transition: opacity 0.2s ease, background-color 0.2s ease;
+            -webkit-tap-highlight-color: transparent;
+            border-radius: 2px;
+        }
+
+        body.file-loaded .history-btn {
+            display: flex;
+        }
+
+        .history-btn:not(:disabled) {
+            opacity: 1.0;
+        }
+
+        .history-btn:not(:disabled):active {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .history-btn:disabled {
+            cursor: not-allowed;
+        }
+
+        .history-btn svg {
+            width: 20px;
+            height: 20px;
+            stroke: currentColor;
+        }
+
+        .file-btn {
+            min-height: 36px;
+            padding: 6px 12px;
+            cursor: pointer;
+            font-size: 13px;
+            border: none;
+            background: #0078a8;
+            color: white;
+            -webkit-tap-highlight-color: transparent;
+            border-radius: 2px;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+        }
+
+        .file-btn:active {
+            background-color: #00698f;
+            box-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
+        }
+
+        .save-btn {
+            min-height: 36px;
+            padding: 6px 12px;
+            cursor: pointer;
+            font-size: 13px;
+            border: none;
+            background: #2da042;
+            color: white;
+            -webkit-tap-highlight-color: transparent;
+            border-radius: 2px;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+            display: none;
+            /* Hidden by default */
+        }
+
+        body.file-loaded .save-btn {
+            display: block;
+            /* Shown only after file is loaded */
+        }
+
+        .save-btn:active {
+            background-color: #1e7e34;
+            box-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
+        }
+
+        .save-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+
+        /* Tab Bar */
+        nav.tabs {
+            background: var(--white);
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            overflow-x: auto;
+            flex-shrink: 0;
+            -webkit-overflow-scrolling: touch;
+            scroll-behavior: smooth;
+        }
+
+        /* Scrollbar Styles - Thin and Elegant */
+        nav.tabs::-webkit-scrollbar,
+        .virtual-scroller::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        nav.tabs::-webkit-scrollbar-track,
+        .virtual-scroller::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        nav.tabs::-webkit-scrollbar-thumb,
+        .virtual-scroller::-webkit-scrollbar-thumb {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 3px;
+            transition: background 0.2s ease;
+        }
+
+        nav.tabs::-webkit-scrollbar-thumb:hover,
+        .virtual-scroller::-webkit-scrollbar-thumb:hover {
+            background: rgba(0, 0, 0, 0.35);
+        }
+
+        nav.tabs::-webkit-scrollbar-thumb:active,
+        .virtual-scroller::-webkit-scrollbar-thumb:active {
+            background: rgba(0, 0, 0, 0.5);
+        }
+
+        /* Firefox scrollbar */
+        nav.tabs,
+        .virtual-scroller {
+            scrollbar-width: thin;
+            scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+        }
+
+        .tab {
+            padding: 8px 12px;
+            white-space: nowrap;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            border-bottom: 2px solid transparent;
+            color: #757575;
+            font-size: 12px;
+            touch-action: manipulation;
+            text-align: center;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .tab.active {
+            color: #1976d2;
+            border-bottom-color: #1976d2;
+            font-weight: 500;
+        }
+
+        .tab-name {
+            flex: 1;
+        }
+
+        .tab-close {
+            background: none;
+            border: none;
+            color: inherit;
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 1;
+            padding: 0;
+            width: 20px;
+            height: 20px;
+            min-width: 20px;
+            min-height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 2px;
+            opacity: 0.6;
+            transition: opacity 0.2s ease, background-color 0.2s ease;
+            -webkit-tap-highlight-color: transparent;
+            font-weight: bold;
+        }
+
+        .tab-close:hover {
+            opacity: 1;
+            background-color: rgba(0, 0, 0, 0.1);
+        }
+
+        .tab-close:active {
+            background-color: rgba(0, 0, 0, 0.2);
+        }
+
+        /* Main Grid Area */
+        main#hex-grid {
+            flex: 1;
+            overflow: hidden;
+            background: var(--white);
+            position: relative;
+            display: none;
+        }
+
+        .virtual-scroller {
+            height: 100%;
+            overflow-y: auto;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            touch-action: pan-y pan-x;
+            overscroll-behavior: none;
+        }
+
+        .virtual-content {
+            position: relative;
+            min-width: 100%;
+            width: max-content;
+        }
+
+        /* Selection mode visual feedback */
+        .virtual-content.selection-mode {
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .virtual-content.selection-mode .hex-byte,
+        .virtual-content.selection-mode .ascii-char {
+            cursor: text;
+        }
+
+        .virtual-content.selection-mode .hex-byte.selected,
+        .virtual-content.selection-mode .ascii-char.selected {
+            background-color: #b3d9ff;
+            color: #0066cc;
+            border: 1px solid #0066cc;
+            box-shadow: 0 0 2px rgba(0, 102, 204, 0.3);
+        }
+
+        .hex-row {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            min-height: 18px;
+            line-height: 18px;
+            font-size: 11px;
+            width: 100%;
+            min-width: max-content;
+        }
+
+        .offset-column {
+            padding: 0 6px 0 10px;
+            color: var(--offset-color);
+            text-align: right;
+            user-select: none;
+            font-family: 'Roboto Mono', monospace;
+            white-space: nowrap;
+            flex-shrink: 0;
+            font-size: 11px;
+        }
+
+        .hex-column {
+            padding: 0 4px;
+            color: var(--text-color);
+            font-family: 'Roboto Mono', monospace;
+            display: flex;
+            flex-wrap: nowrap;
+            gap: 1px;
+            min-width: 0;
+            overflow: visible;
+        }
+
+        .hex-byte {
+            display: inline-block;
+            padding: 0 2px;
+            cursor: pointer;
+            touch-action: pan-y pan-x;
+            width: 20px;
+            min-width: 20px;
+            text-align: center;
+            user-select: none;
+            flex-shrink: 0;
+            font-size: 11px;
+        }
+
+        .hex-byte.selected {
+            background-color: var(--highlight-bg);
+            color: var(--highlight-text);
+            font-weight: bold;
+            border-radius: 2px;
+        }
+
+        .hex-byte.long-press {
+            background-color: rgba(0, 150, 136, 0.3);
+            border: 2px solid #009688;
+            animation: pulse 0.5s ease-in-out;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                transform: scale(1);
+            }
+
+            50% {
+                transform: scale(1.1);
+            }
+        }
+
+        .hex-byte.modified {
+            color: #d32f2f;
+            font-weight: bold;
+        }
+
+        .hex-byte.highlighted {
+            background-color: #b3e5fc;
+            color: #006064;
+        }
+
+        .ascii-char.modified {
+            color: #d32f2f;
+            font-weight: bold;
+        }
+
+        .ascii-column {
+            padding: 0 10px 0 4px;
+            color: var(--grey-text);
+            font-family: 'Roboto Mono', monospace;
+            user-select: none;
+            white-space: nowrap;
+            flex-shrink: 0;
+            font-size: 11px;
+            letter-spacing: -0.5px;
+        }
+
+        .ascii-char {
+            display: inline-block;
+            width: 7px;
+            min-width: 7px;
+            text-align: center;
+            flex-shrink: 0;
+            font-size: 11px;
+            touch-action: pan-y pan-x;
+        }
+
+        .ascii-char.selected {
+            background-color: var(--highlight-bg);
+            color: var(--highlight-text);
+            font-weight: bold;
+            border-radius: 2px;
+        }
+
+        .ascii-char.highlighted {
+            background-color: #b3e5fc;
+            color: #006064;
+        }
+
+        /* Footer Toolbars */
+        footer.toolbars {
+            flex-shrink: 0;
+        }
+
+        .edit-tools {
+            background: var(--toolbar-bg);
+            color: var(--white);
+            display: flex;
+            align-items: center;
+            justify-content: space-around;
+            padding: 8px 4px;
+        }
+
+        .nav-tools {
+            background: var(--header-color);
+            color: var(--white);
+            display: flex;
+            align-items: center;
+            justify-content: space-around;
+            padding: 8px 4px;
+        }
+
+        .toolbar-btn {
+            background: none;
+            border: none;
+            color: var(--white);
+            cursor: pointer;
+            padding: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            touch-action: manipulation;
+            min-width: 44px;
+            min-height: 44px;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+
+        .toolbar-btn:active {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .toolbar-btn svg {
+            width: 24px;
+            height: 24px;
+            fill: currentColor;
+        }
+
+        /* SVG Icons */
+        .icon-btn svg {
+            width: 24px;
+            height: 24px;
+            fill: currentColor;
+        }
+
+        /* Empty State */
+        .empty-state {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: var(--grey-text);
+            font-size: 16px;
+            text-align: center;
+            pointer-events: none;
+        }
+
+        .empty-state.hidden {
+            display: none;
+        }
+
+        /* Hamburger Menu Button */
+        .menu-toggle {
+            background: #0078a8;
+            color: white;
+            border: none;
+            padding: 0;
+            cursor: pointer;
+            font-size: 16px;
+            min-height: 36px;
+            min-width: 36px;
+            height: 36px;
+            width: 36px;
+            display: none;
+            /* Hidden on start */
+            align-items: center;
+            justify-content: center;
+            -webkit-tap-highlight-color: transparent;
+            border-radius: 2px;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+            margin-left: -2px;
+        }
+
+        body.file-loaded .menu-toggle {
+            display: flex;
+        }
+
+        .menu-toggle:active {
+            background-color: #00698f;
+            box-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
+        }
+
+        .menu-toggle svg {
+            width: 18px;
+            height: 18px;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 2;
+        }
+
+        /* Sidebar Overlay */
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 2000;
+        }
+
+        .sidebar-overlay.show {
+            display: block;
+        }
+
+        /* Data Inspector Sidebar */
+        .data-inspector {
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            width: 100%;
+            max-width: 320px;
+            background: var(--white);
+            border-right: 1px solid #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            z-index: 2001;
+            transform: translateX(-100%);
+            transition: transform 0.3s ease-in-out;
+            box-shadow: 2px 0 8px rgba(0, 0, 0, 0.2);
+            margin: auto;
+        }
+
+        header {
+            z-index: 1000;
+            position: relative;
+        }
+
+        .data-inspector.open {
+            transform: translateX(0);
+        }
+
+        .data-inspector-header {
+            background: var(--header-color);
+            color: var(--white);
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .data-inspector-title {
+            font-size: 14px;
+            font-weight: 500;
+            text-align: center;
+            width: 100%;
+        }
+
+        .data-inspector-close {
+            background: transparent;
+            border: none;
+            color: var(--white);
+            cursor: pointer;
+            padding: 4px;
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 2px;
+        }
+
+        .data-inspector-close:active {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .data-inspector-close svg {
+            width: 18px;
+            height: 18px;
+        }
+
+        .data-inspector-nav {
+            display: flex;
+            gap: 8px;
+            padding: 12px;
+            background: var(--white);
+            border-bottom: 1px solid #e0e0e0;
+            justify-content: center;
+        }
+
+        .nav-btn {
+            background: var(--white);
+            border: 1px solid #ddd;
+            padding: 10px;
+            cursor: pointer;
+            font-size: 12px;
+            border-radius: 4px;
+            flex: 1;
+            max-width: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-color);
+            min-height: 40px;
+        }
+
+        .nav-btn:active {
+            background-color: #f0f0f0;
+        }
+
+        .nav-btn svg {
+            width: 18px;
+            height: 18px;
+            stroke: var(--text-color);
+        }
+
+        .data-inspector-content {
+            flex: 1;
+            overflow-y: visible;
+            overflow-x: visible;
+            padding: 8px;
+            font-size: 12px;
+        }
+
+        .data-item {
+            padding: 6px 8px;
+            border-bottom: 1px solid #f0f0f0;
+            display: flex;
+            align-items: center;
+            min-height: 32px;
+        }
+
+        .data-item.selected {
+            background-color: var(--highlight-bg);
+        }
+
+        .data-label {
+            min-width: 100px;
+            color: var(--grey-text);
+            font-weight: 500;
+        }
+
+        .data-value {
+            flex: 1;
+            color: var(--text-color);
+            font-family: 'Roboto Mono', monospace;
+            margin-left: 8px;
+        }
+
+        .data-value.error {
+            color: #d32f2f;
+        }
+
+        .data-inspector-footer {
+            padding: 12px;
+            border-top: 1px solid #e0e0e0;
+            background: var(--white);
+        }
+
+        .footer-section {
+            margin-bottom: 12px;
+        }
+
+        .footer-section:last-child {
+            margin-bottom: 0;
+        }
+
+        .footer-label {
+            font-size: 11px;
+            color: var(--grey-text);
+            margin-bottom: 6px;
+            font-weight: 500;
+        }
+
+        .radio-group {
+            display: flex;
+            gap: 12px;
+        }
+
+        .radio-option {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .radio-option input[type="radio"] {
+            margin: 0;
+        }
+
+        .checkbox-option {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .checkbox-option input[type="checkbox"] {
+            margin: 0;
+        }
+
+        /* Hidden input for mobile keyboard */
+        #hiddenInput {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+            width: 1px;
+            height: 1px;
+            left: -9999px;
+            top: -9999px;
+            border: none;
+            background: transparent;
+            color: transparent;
+            font-size: 1px;
+            padding: 0;
+            margin: 0;
+        }
+
+        /* Selection Handles - Android-style teardrops */
+        .selection-handle {
+            position: absolute;
+            width: 48px;
+            /* Large hit target */
+            height: 48px;
+            background: transparent;
+            z-index: 1000;
+            cursor: move;
+            touch-action: none;
+            pointer-events: auto;
+            display: none;
+            /* Center the box relative to the anchor point */
+            margin-left: -24px;
+            margin-top: 0;
+            /* Box starts at the bottom of the line */
+        }
+
+        /* The visible blue teardrop */
+        .selection-handle::after {
+            content: '';
+            position: absolute;
+            left: 50%;
+            top: 0;
+            /* distinct visual start */
+            transform: translateX(-50%);
+            width: 22px;
+            height: 22px;
+            background: #2196F3;
+            border-radius: 0 50% 50% 50%;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4);
+        }
+
+        .selection-handle.visible {
+            display: block;
+        }
+
+        #startHandle::after {
+            border-radius: 50% 0 50% 50%;
+            /* Point to top-right */
+        }
+
+        #endHandle::after {
+            border-radius: 0 50% 50% 50%;
+            /* Point to top-left */
+        }
+
+        /* Home Dashboard */
+        #dashboard {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 24px 16px;
+            overflow-y: auto;
+        }
+
+        .dash-container {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            width: 100%;
+            max-width: 260px;
+            margin: 0 auto;
+            align-items: center;
+        }
+
+        .dash-btn {
+            width: 100%;
+            padding: 10px 14px;
+            font-size: 13px;
+            font-weight: 500;
+            background: linear-gradient(135deg, var(--header-color) 0%, #0078a8 100%);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 0;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+            letter-spacing: 0.2px;
+        }
+
+        .dash-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(0, 0, 0, 0.15);
+            filter: brightness(1.1);
+        }
+
+        .dash-btn:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .dash-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(rgba(255, 255, 255, 0.1), transparent);
+            pointer-events: none;
+        }
+
+        .dash-btn-icon {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            margin-right: 10px;
+            flex-shrink: 0;
+        }
+
+        .dash-btn svg {
+            width: 18px;
+            height: 18px;
+            fill: white;
+        }
+
+        .dash-btn-text {
+            flex: 1;
+            text-align: left;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* File Tools View */
+        #fileToolsView {
+            display: none;
+            flex: 1;
+            flex-direction: column;
+            padding: 20px;
+            gap: 20px;
+            overflow-y: auto;
+        }
+
+        .tool-section {
+            background: var(--white);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #edf2f7;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+            transition: box-shadow 0.2s ease;
+        }
+
+        .tool-section:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        }
+
+        .tool-section h3 {
+            margin-bottom: 15px;
+            color: var(--header-color);
+            font-size: 16px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .input-group {
+            margin-bottom: 10px;
+        }
+
+        .input-group label {
+            display: block;
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 4px;
+        }
+
+        .file-list {
+            list-style: none;
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            background: white;
+            margin-bottom: 10px;
+            font-size: 13px;
+            border-radius: 4px;
+        }
+
+        .file-item {
+            padding: 10px 12px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: white;
+            cursor: grab;
+            user-select: none;
+        }
+
+        .diff-result-item {
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+            background: white;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .diff-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 11px;
+            color: #757575;
+            border-bottom: 1px dashed #eee;
+            padding-bottom: 4px;
+        }
+
+        .diff-comparison {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .diff-box {
+            flex: 1;
+            padding: 8px;
+            border-radius: 6px;
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .diff-box.a {
+            border-left: 4px solid #ef5350;
+        }
+
+        .diff-box.b {
+            border-left: 4px solid #66bb6a;
+        }
+
+        .diff-box .diff-label {
+            font-size: 9px;
+            text-transform: uppercase;
+            color: #999;
+            font-weight: bold;
+        }
+
+        .diff-box .diff-hex {
+            font-family: 'Roboto Mono', monospace;
+            font-size: 16px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .diff-box .diff-ascii {
+            font-size: 12px;
+            color: #666;
+            font-style: italic;
+        }
+
+        .diff-arrow {
+            color: #ced4da;
+            font-size: 20px;
+        }
+
+        .hash-result {
+            word-break: break-all;
+            background: #e2e8f0;
+            padding: 8px;
+            border-radius: 4px;
+            font-family: 'Roboto Mono', monospace;
+            margin-top: 5px;
+            font-size: 11px;
+            color: #1e293b;
+        }
+
+        body.dark-theme .hash-result {
+            background: #0f172a;
+            color: #e2e8f0;
+            border: 1px solid #334155;
+        }
+
+        .string-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            border-bottom: 1px solid #eee;
+            font-size: 11px;
+        }
+
+        .string-offset {
+            color: var(--offset-color);
+        }
+
+        .string-text {
+            font-family: 'Roboto Mono', monospace;
+            word-break: break-all;
+            margin-left: 10px;
+            flex: 1;
+        }
+
+        .file-item.dragging {
+            opacity: 0.5;
+            background: #f0f7ff;
+            border: 1px dashed #2196F3;
+        }
+
+        .file-item:last-child {
+            border-bottom: none;
+        }
+
+        .file-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            overflow: hidden;
+        }
+
+        .drag-handle {
+            color: #ccc;
+            cursor: grab;
+            font-size: 18px;
+        }
+
+        .file-name-text {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .remove-file {
+            color: #f44336;
+            cursor: pointer;
+            padding: 4px 8px;
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        input[type="text"],
+        input[type="number"],
+        select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1.5px solid #e2e8f0;
+            border-radius: 8px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 14px;
+            background: #fcfcfd;
+            transition: all 0.2s ease;
+            color: #2d3748;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: var(--header-color);
+            background: var(--white);
+            box-shadow: 0 0 0 3px rgba(0, 105, 143, 0.1);
+        }
+
+        .converter-field {
+            border-left: 4px solid #cbd5e0;
+            padding-left: 12px;
+            margin-bottom: 16px;
+        }
+
+        .converter-field.hex {
+            border-left-color: #ed8936;
+        }
+
+        .converter-field.dec {
+            border-left-color: #48bb78;
+        }
+
+        .converter-field.bin {
+            border-left-color: #4299e1;
+        }
+
+        .converter-field.oct {
+            border-left-color: #9f7aea;
+        }
+
+        .converter-field.ascii {
+            border-left-color: #f66d9b;
+        }
+
+        .converter-field label {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+            color: #4a5568;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .action-btn {
+            width: 100%;
+            padding: 10px;
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        /* Custom Toast Notification */
+        #customToast {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: rgba(33, 33, 33, 0.9);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 25px;
+            font-size: 13px;
+            z-index: 10000;
+            transition: transform 0.3s ease;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+            text-align: center;
+            max-width: 80%;
+            backdrop-filter: blur(5px);
+        }
+
+        #customToast.show {
+            transform: translateX(-50%) translateY(0);
+        }
+
+        /* ====== UAsset Property Diff View Styles ====== */
+        .uasset-diff-container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        .uasset-file-inputs {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            padding: 12px;
+            background: var(--toolbar-bg);
+            border-bottom: 1px solid #333;
+        }
+
+        .uasset-file-set {
+            background: #1e293b;
+            border-radius: 8px;
+            padding: 12px;
+            border: 1px solid #334155;
+        }
+
+        .uasset-file-set h4 {
+            margin: 0 0 10px 0;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .uasset-file-set.set-a h4 {
+            color: #ef5350;
+        }
+
+        .uasset-file-set.set-b h4 {
+            color: #66bb6a;
+        }
+
+        .uasset-file-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+            align-items: center;
+        }
+
+        .uasset-file-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .uasset-file-row label {
+            font-size: 11px;
+            color: #94a3b8;
+            min-width: 50px;
+        }
+
+        .uasset-file-name {
+            flex: 1;
+            font-size: 11px;
+            color: #64748b;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-style: italic;
+        }
+
+        .uasset-file-name.has-file {
+            color: #22c55e;
+            font-style: normal;
+        }
+
+        .uasset-file-btn {
+            padding: 6px 10px;
+            font-size: 10px;
+            background: #334155;
+            border: none;
+            border-radius: 4px;
+            color: white;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .uasset-file-btn:hover {
+            background: #475569;
+        }
+
+        /* Property Diff Results Container */
+        .property-diff-results {
+            overflow-y: auto;
+            background: #0f172a;
+            border-radius: 8px;
+            -webkit-overflow-scrolling: touch;
+            min-height: 200px;
+        }
+
+        /* ====== Vertical Card Layout for Property Diff ====== */
+        .property-diff-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 12px;
+            padding-bottom: 40px;
+        }
+
+        .property-diff-card {
+            background: #1e293b;
+            border-radius: 8px;
+            padding: 12px;
+            border-left: 4px solid #475569;
+        }
+
+        .property-diff-card.diff-modified {
+            border-left-color: #fbbf24;
+            background: rgba(251, 191, 36, 0.08);
+        }
+
+        .property-diff-card.diff-added {
+            border-left-color: #22c55e;
+            background: rgba(34, 197, 94, 0.08);
+        }
+
+        .property-diff-card.diff-removed {
+            border-left-color: #ef4444;
+            background: rgba(239, 68, 68, 0.08);
+        }
+
+        .prop-card-location {
+            font-size: 11px;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 6px 12px;
+            margin: -12px -12px 8px -12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 8px 8px 0 0;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: #94a3b8;
+            font-family: 'Roboto Mono', monospace;
+            flex-wrap: wrap;
+            line-height: 1.4;
+        }
+
+        .location-export {
+            color: #fbbf24;
+            font-weight: 600;
+        }
+
+        .location-path {
+            color: #38bdf8;
+            word-break: break-all;
+        }
+
+        .location-sep {
+            color: #475569;
+        }
+
+        .prop-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+
+        .prop-card-name {
+            font-weight: 600;
+            font-size: 13px;
+            color: #e2e8f0;
+            font-family: 'Roboto Mono', monospace;
+            white-space: pre;
+        }
+
+        .prop-card-badge {
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .diff-modified .prop-card-badge {
+            background: rgba(251, 191, 36, 0.2);
+            color: #fbbf24;
+        }
+
+        .diff-added .prop-card-badge {
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+        }
+
+        .diff-removed .prop-card-badge {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+
+        .prop-card-type {
+            font-size: 11px;
+            color: #a78bfa;
+            /* Lighter violet for dark mode */
+            margin-bottom: 8px;
+        }
+
+        .prop-card-values {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .prop-card-value {
+            display: flex;
+            gap: 8px;
+            padding: 6px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-family: 'Roboto Mono', monospace;
+            word-break: break-all;
+        }
+
+        .prop-card-value.val-a {
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+        .prop-card-value.val-b {
+            background: rgba(34, 197, 94, 0.1);
+        }
+
+        .prop-val-label {
+            font-weight: 600;
+            min-width: 20px;
+            flex-shrink: 0;
+        }
+
+        .val-a .prop-val-label {
+            color: #f87171;
+        }
+
+        .val-b .prop-val-label {
+            color: #4ade80;
+        }
+
+        .prop-val-content {
+            color: #cbd5e1;
+            flex: 1;
+        }
+
+        /* Light Theme Overrides for Property Diff */
+        body:not(.dark-theme) .property-diff-results {
+            background: #f8fafc;
+        }
+
+        body:not(.dark-theme) .property-diff-card {
+            background: #ffffff;
+            border-color: #e2e8f0;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        body:not(.dark-theme) .property-diff-card.diff-modified {
+            background: rgba(251, 191, 36, 0.1);
+        }
+
+        body:not(.dark-theme) .property-diff-card.diff-added {
+            background: rgba(34, 197, 94, 0.1);
+        }
+
+        body:not(.dark-theme) .property-diff-card.diff-removed {
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+        body:not(.dark-theme) .prop-card-name {
+            color: #1e293b;
+        }
+
+
+
+        body:not(.dark-theme) .prop-card-type {
+            color: #6d28d9;
+        }
+
+        body:not(.dark-theme) .prop-card-value.val-a {
+            background: rgba(239, 68, 68, 0.15);
+        }
+
+        body:not(.dark-theme) .prop-card-value.val-b {
+            background: rgba(34, 197, 94, 0.15);
+        }
+
+        body:not(.dark-theme) .prop-val-content {
+            color: #334155;
+        }
+
+        body:not(.dark-theme) .prop-card-location {
+            background: #f1f5f9;
+            border-bottom: 1px solid #e2e8f0;
+            color: #64748b;
+        }
+
+        body:not(.dark-theme) .location-export {
+            color: #d97706;
+            /* Darker amber */
+        }
+
+        body:not(.dark-theme) .location-path {
+            color: #0284c7;
+            /* Darker sky blue */
+        }
+
+        body:not(.dark-theme) .location-sep {
+            color: #cbd5e1;
+        }
+
+        body:not(.dark-theme) .val-a .prop-val-label {
+            color: #dc2626;
+        }
+
+        body:not(.dark-theme) .val-b .prop-val-label {
+            color: #16a34a;
+        }
+
+        body:not(.dark-theme) .diff-modified .prop-card-badge {
+            background: rgba(251, 191, 36, 0.3);
+            color: #b45309;
+        }
+
+        body:not(.dark-theme) .diff-added .prop-card-badge {
+            background: rgba(34, 197, 94, 0.3);
+            color: #15803d;
+        }
+
+        body:not(.dark-theme) .diff-removed .prop-card-badge {
+            background: rgba(239, 68, 68, 0.3);
+            color: #b91c1c;
+        }
+
+        /* Export tree structure */
+        .export-tree {
+            padding: 12px;
+            background: #1e293b;
+            border-bottom: 1px solid #334155;
+        }
+
+        .export-selector {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .export-selector label {
+            font-size: 11px;
+            color: #94a3b8;
+        }
+
+        .export-selector select {
+            flex: 1;
+            max-width: 300px;
+            padding: 6px 10px;
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 4px;
+            color: #e2e8f0;
+            font-size: 12px;
+        }
+
+        .diff-summary {
+            display: flex;
+            gap: 16px;
+            font-size: 11px;
+            color: #94a3b8;
+        }
+
+        .diff-summary-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .diff-summary-item .badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 10px;
+        }
+
+        .diff-summary-item .badge-modified {
+            background: rgba(251, 191, 36, 0.2);
+            color: #fbbf24;
+        }
+
+        .diff-summary-item .badge-added {
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+        }
+
+        .diff-summary-item .badge-removed {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+
+        /* Loading state for diff */
+        .diff-loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            padding: 40px;
+            color: #94a3b8;
+        }
+
+        .diff-loading-spinner {
+            width: 32px;
+            height: 32px;
+            border: 3px solid #334155;
+            border-top-color: var(--primary-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Empty state for property diff */
+        .property-diff-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 20px;
+            color: #64748b;
+            text-align: center;
+        }
+
+        .property-diff-empty svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .property-diff-empty h3 {
+            margin: 0 0 8px 0;
+            color: #94a3b8;
+            font-weight: 500;
+        }
+
+        .property-diff-empty p {
+            margin: 0;
+            font-size: 13px;
+        }
+
+        /* Filter toggle for hiding unchanged */
+        .diff-filters {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .diff-filter-label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: #94a3b8;
+            cursor: pointer;
+        }
+
+        .diff-filter-label input {
+            accent-color: var(--primary-color);
+        }
+
+        /* Responsive adjustments for mobile */
+        @media screen and (max-width: 768px) {
+            .uasset-file-inputs {
+                grid-template-columns: 1fr;
+            }
+
+            .property-diff-table th:nth-child(3),
+            .property-diff-table td:nth-child(3) {
+                display: none;
+            }
+
+            .col-val-a,
+            .col-val-b {
+                max-width: 100px;
+            }
+        }
+
+        /* Custom Modal */
+        #modalOverlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(3px);
+            z-index: 9000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #customModal {
+            background: white;
+            width: 85%;
+            max-width: 320px;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+            text-align: center;
+            animation: modalScale 0.2s ease-out;
+        }
+
+        @keyframes modalScale {
+            from {
+                transform: scale(0.9);
+                opacity: 0;
+            }
+
+            to {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        .modal-message {
+            font-size: 15px;
+            color: #333;
+            margin-bottom: 20px;
+            line-height: 1.4;
+        }
+
+        .modal-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+        }
+
+        .modal-btn {
+            padding: 10px 25px;
+            border: none;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 14px;
+            cursor: pointer;
+            min-width: 80px;
+            color: white;
+        }
+
+        .btn-yes {
+            background: #2da042;
+        }
+
+        .btn-no {
+            background: #d32f2f;
+        }
+
+        .modal-btn:active {
+            opacity: 0.8;
+        }
+
+        #modalInputContainer {
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        #modalInput {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 16px;
+            font-family: 'Roboto Mono', monospace;
+            text-align: center;
+        }
+
+        #modalInput:focus {
+            border-color: #00796b;
+            outline: none;
+        }
+
+        /* Toast Notification Styling Override */
+        #customToast {
+            position: fixed;
+            bottom: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1f2937;
+            color: #f3f4f6;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            font-family: 'Outfit', sans-serif;
+            z-index: 9999;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+
+            /* Smart Layout */
+            width: auto;
+            min-width: 200px;
+            max-width: 85vw;
+            /* Max 85% of viewport width */
+            white-space: normal;
+            /* Allow wrapping */
+            word-break: break-word;
+            /* Break long words/filenames if needed */
+            line-height: 1.4;
+
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        #customToast.show {
+            opacity: 1;
+            visibility: visible;
+            transform: translateX(-50%) translateY(-20px);
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Header -->
+    <header>
+        <div class="header-left">
+            <button class="back-btn" id="backBtn" aria-label="Back">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                    stroke-linejoin="round">
+                    <path d="M19 12H5M12 19l-7-7 7-7" />
+                </svg>
+            </button>
+            <button class="menu-toggle" id="menuToggle" aria-label="Data Inspector">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="3" y1="6" x2="21" y2="6"></line>
+                    <line x1="3" y1="12" x2="21" y2="12"></line>
+                    <line x1="3" y1="18" x2="21" y2="18"></line>
+                </svg>
+            </button>
+            <button class="history-btn" id="undoBtn" aria-label="Undo" disabled>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                    stroke-linejoin="round">
+                    <path d="M3 7v6h6"></path>
+                    <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path>
+                </svg>
+            </button>
+            <button class="history-btn" id="redoBtn" aria-label="Redo" disabled>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                    stroke-linejoin="round">
+                    <path d="M21 7v6h-6"></path>
+                    <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13"></path>
+                </svg>
+            </button>
+        </div>
+        <div class="header-right">
+
+            <button class="save-btn" id="saveBtn" aria-label="Save" disabled>Save</button>
+        </div>
+    </header>
+
+    <!-- Home Dashboard -->
+    <div id="dashboard">
+        <div class="dash-container">
+            <button class="dash-btn" id="btnGoHex">
+                <div class="dash-btn-icon">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                    </svg>
+                </div>
+                <span class="dash-btn-text">Hex Editor</span>
+            </button>
+            <button class="dash-btn" id="btnGoTools">
+                <div class="dash-btn-icon">
+                    <svg viewBox="0 0 24 24">
+                        <path
+                            d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.77 3.77z" />
+                    </svg>
+                </div>
+                <span class="dash-btn-text">Split / Merge</span>
+            </button>
+            <button class="dash-btn" id="btnGoStrings">
+                <div class="dash-btn-icon">
+                    <svg viewBox="0 0 24 24">
+                        <path
+                            d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
+                        <path d="M7 8h5v1H7zm0 2h5v1H7zm0 2h3v1H7z" />
+                    </svg>
+                </div>
+                <span class="dash-btn-text">Strings Explorer</span>
+            </button>
+            <button class="dash-btn" id="btnGoHashes">
+                <div class="dash-btn-icon">
+                    <svg viewBox="0 0 24 24">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                    </svg>
+                </div>
+                <span class="dash-btn-text">Hash Calculator</span>
+            </button>
+            <button class="dash-btn" id="btnGoConverter">
+                <div class="dash-btn-icon">
+                    <svg viewBox="0 0 24 24">
+                        <path
+                            d="M19 8l-4 4h3c0 3.31-2.69 6-6 6a5.87 5.87 0 0 1-2.8-.7l-1.46 1.46A7.93 7.93 0 0 0 12 20c4.42 0 8-3.58 8-8h3l-4-4zM6 12c0-3.31 2.69-6 6-6 1.01 0 1.97.25 2.8.7l1.46-1.46A7.93 7.93 0 0 0 12 4c-4.42 0-8 3.58-8 8H1l4 4 4-4H6z" />
+                    </svg>
+                </div>
+                <span class="dash-btn-text">Unit Converter</span>
+            </button>
+            <button class="dash-btn" id="btnGoDiff">
+                <div class="dash-btn-icon">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M16 3H4v18h16V7l-4-4z" />
+                        <path d="M14 3v4h4" />
+                        <path d="M9 13h6" />
+                        <path d="M9 17h6" />
+                    </svg>
+                </div>
+                <span class="dash-btn-text">Compare Files</span>
+            </button>
+
+            <!-- New Tools Section -->
+            <button class="dash-btn" id="btnGoEntropy">
+                <div class="dash-btn-icon">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M3.5 18.49l6-6.01 4 4L22 6.92l-1.41-1.41-7.09 7.97-4-4L2 17.08l1.5 1.41z" />
+                    </svg>
+                </div>
+                <span class="dash-btn-text">Entropy Map</span>
+            </button>
+
+            <button class="dash-btn" id="btnGoSig">
+                <div class="dash-btn-icon">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2zm0 15l-5-2.18L7 18V5h10v13z" />
+                    </svg>
+                </div>
+                <span class="dash-btn-text">Signatures</span>
+            </button>
+            <button class="dash-btn" id="btnGoEncode">
+                <div class="dash-btn-icon">
+                    <svg viewBox="0 0 24 24">
+                        <path
+                            d="M11 15h2v2h-2zm0-8h2v6h-2zm.99-5C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z" />
+                    </svg>
+                </div>
+                <span class="dash-btn-text">Base64 Encoder</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- File Tools View -->
+    <div id="fileToolsView">
+        <div class="tool-section">
+            <h3>File Merge</h3>
+            <ul class="file-list" id="joinFileList"></ul>
+            <button class="action-btn" style="background:#0078a8; margin-bottom:10px"
+                onclick="document.getElementById('joinInput').click()">Add Files</button>
+            <div class="input-group" id="joinOutputContainer" style="display: none;">
+                <label>Output Filename</label>
+                <input type="text" id="joinOutputName" placeholder="merged_output.bin"
+                    style="margin-bottom: 10px; width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+            </div>
+            <button class="action-btn" onclick="app.processJoin()" style="background:#2da042">Merge Files</button>
+            <input type="file" id="joinInput" style="display:none" multiple>
+        </div>
+
+        <div class="tool-section">
+            <h3>File Splitter</h3>
+            <div class="input-group">
+                <label>Select File</label>
+                <button class="action-btn" style="background:#0078a8"
+                    onclick="document.getElementById('splitInput').click()">Add Files</button>
+                <div id="splitFileNameDisplay" style="font-size:11px; margin-top:5px; color:#555; font-style: italic;">
+                    No file selected</div>
+            </div>
+            <div id="splitSettingsContainer" style="display: none;">
+                <div class="input-group">
+                    <label>Split Size</label>
+                    <div style="display:flex; gap:10px">
+                        <input type="number" id="splitSizeValue" placeholder="65536">
+                        <select id="splitSizeUnit">
+                            <option value="1">Bytes</option>
+                            <option value="1024">KB</option>
+                            <option value="1048576">MB</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="input-group" id="splitBaseContainer">
+                    <label>Split Base Name</label>
+                    <input type="text" id="splitBaseName" placeholder="split_part"
+                        style="margin-bottom: 10px; width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+                </div>
+            </div>
+            <button class="action-btn" onclick="app.processSplit()" style="background:#2da042">Split File</button>
+            <input type="file" id="splitInput" style="display:none">
+        </div>
+    </div>
+
+    <!-- Strings Finder View -->
+    <div id="stringsView" style="display:none; flex:1; flex-direction:column; padding:20px; gap:20px; overflow-y:auto;">
+        <div class="tool-section">
+            <h3>Strings Finder</h3>
+            <div class="input-group">
+                <label>Select File</label>
+                <button class="action-btn" style="background:#0078a8"
+                    onclick="document.getElementById('stringInput').click()">Choose File</button>
+                <div id="stringFileNameDisplay" style="font-size:11px; margin-top:5px; color:#555;">No file selected
+                </div>
+            </div>
+            <div class="input-group">
+                <label>Minimum Length</label>
+                <input type="number" id="minStringLength" value="4" min="2" max="100">
+            </div>
+            <button class="action-btn" onclick="app.processStrings()" style="background:#2da042">Extract
+                Strings</button>
+            <input type="file" id="stringInput" style="display:none">
+        </div>
+        <div id="stringResults" class="tool-section" style="display:none; flex:1; overflow-y:auto;">
+            <h3>Results (<span id="stringCount">0</span>)</h3>
+            <div id="stringList" style="max-height: 400px; overflow-y: auto;"></div>
+        </div>
+    </div>
+
+    <!-- Hash Toolkit View -->
+    <div id="hashView" style="display:none; flex:1; flex-direction:column; padding:20px; gap:20px; overflow-y:auto;">
+        <div class="tool-section">
+            <h3>Hash Toolkit</h3>
+            <div class="input-group">
+                <label>Select File</label>
+                <button class="action-btn" style="background:#0078a8"
+                    onclick="document.getElementById('hashInput').click()">Choose File</button>
+                <div id="hashFileNameDisplay" style="font-size:11px; margin-top:5px; color:#555;">No file selected</div>
+            </div>
+            <button class="action-btn" onclick="app.processHashes()" style="background:#2da042">Calculate
+                Hashes</button>
+            <input type="file" id="hashInput" style="display:none">
+        </div>
+        <div id="hashResults" class="tool-section" style="display:none;">
+            <h3>Results</h3>
+            <div>
+                <label>SHA-256</label>
+                <div id="hashSHA256" class="hash-result">-</div>
+            </div>
+            <div style="margin-top:10px">
+                <label>SHA-1</label>
+                <div id="hashSHA1" class="hash-result">-</div>
+            </div>
+            <div style="margin-top:10px">
+                <label>CRC32</label>
+                <div id="hashCRC32" class="hash-result">-</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Converter View -->
+    <div id="converterView"
+        style="display:none; flex:1; flex-direction:column; padding:20px; gap:20px; overflow-y:auto;">
+        <div class="tool-section">
+            <h3>
+                <svg viewBox="0 0 24 24" style="width:18px; height:18px; fill:currentColor;">
+                    <path
+                        d="M19 8l-4 4h3c0 3.31-2.69 6-6 6a5.87 5.87 0 0 1-2.8-.7l-1.46 1.46A7.93 7.93 0 0 0 12 20c4.42 0 8-3.58 8-8h3l-4-4zM6 12c0-3.31 2.69-6 6-6 1.01 0 1.97.25 2.8.7l1.46-1.46A7.93 7.93 0 0 0 12 4c-4.42 0-8 3.58-8 8H1l4 4 4-4H6z" />
+                </svg>
+                Values Converter
+            </h3>
+            <div class="input-group converter-field hex">
+                <label>Hexadecimal</label>
+                <input type="text" id="convHex" placeholder="0x..." oninput="app.convert('hex')">
+            </div>
+            <div class="input-group converter-field dec">
+                <label>Decimal</label>
+                <input type="text" id="convDec" placeholder="0" oninput="app.convert('dec')">
+            </div>
+            <div class="input-group converter-field bin">
+                <label>Binary</label>
+                <input type="text" id="convBin" placeholder="00000000" oninput="app.convert('bin')">
+            </div>
+            <div class="input-group converter-field oct">
+                <label>Octal</label>
+                <input type="text" id="convOct" placeholder="0" oninput="app.convert('oct')">
+            </div>
+            <div class="input-group converter-field ascii">
+                <label>ASCII</label>
+                <input type="text" id="convAscii" placeholder="A" oninput="app.convert('ascii')" maxlength="1">
+            </div>
+        </div>
+    </div>
+
+    <!-- Diff (Compare) View - Property Only -->
+    <div id="diffView" style="display:none; flex:1; flex-direction:column; padding:10px; gap:10px; overflow-y:auto;">
+
+        <!-- File Selection Section (will be hidden after comparison) -->
+        <div id="diffInputSection">
+            <!-- Asset Set A -->
+            <div class="tool-section" style="padding:12px; margin-bottom:10px;">
+                <h3 style="margin-bottom:8px;">Original File</h3>
+                <button class="action-btn" style="background:#0078a8; padding:8px;"
+                    onclick="document.getElementById('uassetInputA').click()">Select .uasset</button>
+                <div id="uassetFileNameA" style="font-size:10px; margin-top:3px; color:#555; font-style:italic;">No file
+                    selected</div>
+
+                <button class="action-btn" style="background:#0078a8; margin-top:6px; padding:8px;"
+                    onclick="document.getElementById('uexpInputA').click()">Select .uexp</button>
+                <div id="uexpFileNameA" style="font-size:10px; margin-top:3px; color:#555; font-style:italic;">No file
+                    selected</div>
+            </div>
+
+            <!-- Asset Set B -->
+            <div class="tool-section" style="padding:12px; margin-bottom:10px;">
+                <h3 style="margin-bottom:8px;">Modified File</h3>
+                <button class="action-btn" style="background:#0078a8; padding:8px;"
+                    onclick="document.getElementById('uassetInputB').click()">Select .uasset</button>
+                <div id="uassetFileNameB" style="font-size:10px; margin-top:3px; color:#555; font-style:italic;">No file
+                    selected</div>
+
+                <button class="action-btn" style="background:#0078a8; margin-top:6px; padding:8px;"
+                    onclick="document.getElementById('uexpInputB').click()">Select .uexp</button>
+                <div id="uexpFileNameB" style="font-size:10px; margin-top:3px; color:#555; font-style:italic;">No file
+                    selected</div>
+            </div>
+
+            <!-- Hidden file inputs -->
+            <input type="file" id="uassetInputA" accept="*/*" style="display:none">
+            <input type="file" id="uexpInputA" accept="*/*" style="display:none">
+            <input type="file" id="uassetInputB" accept="*/*" style="display:none">
+            <input type="file" id="uexpInputB" accept="*/*" style="display:none">
+
+            <!-- Compare Button -->
+            <button class="action-btn" onclick="app.processPropertyDiff()" style="background:#2da042; padding:10px;">
+                Start Comparison
+            </button>
+        </div>
+
+        <!-- New Comparison Button (shown after comparison) -->
+        <button id="newComparisonBtn" class="action-btn" onclick="app.resetPropertyDiff()"
+            style="display:none; background:#0078a8; padding:8px;">
+            ← New Comparison
+        </button>
+
+        <!-- Summary -->
+        <div class="diff-summary" id="propDiffSummary" style="display: none; justify-content: center;">
+            <div class="diff-summary-item">
+                <span class="badge badge-modified" id="modifiedCount">0</span> Modified
+            </div>
+        </div>
+
+        <!-- Property Diff Results -->
+        <div class="property-diff-results" id="propertyDiffResults" style="display:none;"></div>
+    </div>
+
+
+    <!-- Placeholder Views for New Tools -->
+    <div id="entropyView" style="display:none; flex:1; flex-direction:column; padding:20px; gap:20px; overflow-y:auto;">
+        <div class="tool-section">
+            <h3>Entropy Analysis</h3>
+            <div class="input-group">
+                <label>Select File</label>
+                <button class="action-btn" style="background:#0078a8"
+                    onclick="document.getElementById('entropyInput').click()">Choose File</button>
+                <div id="entropyFileNameDisplay" style="font-size:11px; margin-top:5px; color:#555;">No file selected
+                </div>
+            </div>
+            <p style="font-size:12px; color:#666; margin-top: 10px;">Detect encrypted or compressed data regions.</p>
+            <div id="entropyCanvasContainer"
+                style="height:150px; background:#f8f9fa; border-radius:8px; display:flex; align-items:center; justify-content:center; border:1px dashed #cbd5e0; margin-top: 10px;">
+                <canvas id="entropyCanvas" style="width:100%; height:100%; display:none;"></canvas>
+                <span id="entropyPlaceholder" style="color:#94a3b8; font-size:11px;">Select a file to visualize entropy
+                    map</span>
+            </div>
+            <button class="action-btn" style="margin-top:15px; background:#2da042"
+                onclick="app.processEntropy()">Calculate Entropy</button>
+            <input type="file" id="entropyInput" style="display:none">
+        </div>
+    </div>
+
+
+
+    <div id="signatureView"
+        style="display:none; flex:1; flex-direction:column; padding:20px; gap:20px; overflow-y:auto;">
+        <div class="tool-section">
+            <h3>Data Signatures</h3>
+            <div class="input-group">
+                <label>Select File</label>
+                <button class="action-btn" style="background:#0078a8"
+                    onclick="document.getElementById('sigInput').click()">Choose File</button>
+                <div id="sigFileNameDisplay" style="font-size:11px; margin-top:5px; color:#555;">No file selected</div>
+            </div>
+            <p style="font-size:12px; color:#666; margin-top:10px;">Match magic bytes against known file headers.</p>
+            <div id="sigResultList"
+                style="max-height:200px; overflow-y:auto; background:white; border:1px solid #e2e8f0; border-radius:8px; padding:10px; margin-top:10px;">
+                <div id="sigPlaceholder" style="font-size:11px; color:#94a3b8; text-align:center;">Scan file to see
+                    matched signatures</div>
+            </div>
+            <button class="action-btn" style="margin-top:15px; background:#2da042"
+                onclick="app.processSignatures()">Scan File</button>
+            <input type="file" id="sigInput" style="display:none">
+        </div>
+    </div>
+
+    <div id="encodingView"
+        style="display:none; flex:1; flex-direction:column; padding:20px; gap:20px; overflow-y:auto;">
+        <div class="tool-section">
+            <h3>Base64 Encoder / Decoder</h3>
+            <div class="input-group">
+                <label>Input Text</label>
+                <textarea id="b64Input"
+                    style="width:100%; height:100px; padding:10px; border-radius:8px; border:1.5px solid #e2e8f0; font-family:monospace; font-size:12px; resize: none;"></textarea>
+            </div>
+            <div style="display:flex; gap:10px; margin-top: 10px;">
+                <button class="action-btn" style="background:#0078a8; flex:1;"
+                    onclick="app.base64Encode()">Encode</button>
+                <button class="action-btn" style="background:#2da042; flex:1;"
+                    onclick="app.base64Decode()">Decode</button>
+            </div>
+            <div style="margin-top:15px;">
+                <label style="font-size:11px; color:#666; font-weight: bold; text-transform: uppercase;">Result:</label>
+                <textarea id="b64Result" readonly
+                    style="width:100%; height:100px; padding:10px; border-radius:8px; border:1.5px solid #e2e8f0; font-family:monospace; font-size:12px; background: #f8f9fa; resize: none; margin-top: 5px;"></textarea>
+            </div>
+            <button class="action-btn" style="margin-top:10px; background:#718096; color: white;"
+                onclick="app.copyB64Result()">Copy to Clipboard</button>
+        </div>
+    </div>
+
+    <!-- Tab Bar -->
+    <nav class="tabs" id="tabsContainer" style="display:none"></nav>
+
+    <!-- Main Grid Area -->
+    <main id="hex-grid">
+        <div class="empty-state" id="emptyState">No content yet!</div>
+        <div class="virtual-scroller" id="virtualScroller">
+            <div class="virtual-content" id="virtualContent"></div>
+        </div>
+        <div class="selection-handle" id="startHandle"></div>
+        <div class="selection-handle" id="endHandle"></div>
+    </main>
+
+    <!-- Data Inspector Sidebar -->
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+    <div class="data-inspector" id="dataInspector">
+        <div class="data-inspector-header">
+            <span class="data-inspector-title">Data Inspector</span>
+        </div>
+        <div class="data-inspector-nav">
+            <button class="nav-btn" id="navFirst" title="First">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="11 17 6 12 11 7"></polyline>
+                    <polyline points="18 17 13 12 18 7"></polyline>
+                </svg>
+            </button>
+            <button class="nav-btn" id="navPrev" title="Previous">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="15 18 9 12 15 6"></polyline>
+                </svg>
+            </button>
+            <button class="nav-btn" id="navNext" title="Next">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                </svg>
+            </button>
+            <button class="nav-btn" id="navLast" title="Last">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="13 17 18 12 13 7"></polyline>
+                    <polyline points="6 17 11 12 6 7"></polyline>
+                </svg>
+            </button>
+        </div>
+        <div class="data-inspector-content" id="inspectorContent"></div>
+    </div>
+
+    <input type="text" id="hiddenInput" autocomplete="off" />
+
+    <!-- Custom UI Components -->
+    <div id="customToast"></div>
+
+    <div id="modalOverlay">
+        <div id="customModal">
+            <div class="modal-message" id="modalMessage"></div>
+            <div id="modalInputContainer">
+                <input type="text" id="modalInput" autocomplete="off">
+            </div>
+            <div class="modal-buttons">
+                <button class="modal-btn btn-no" id="modalNo">NO</button>
+                <button class="modal-btn btn-yes" id="modalYes">YES</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        try {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('theme') === 'dark') {
+                document.body.classList.add('dark-theme');
+            }
+        } catch (e) { console.error(e); }
+    </script>
+    <script src="main.js?v=6"></script>
+    <script src="xev.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,58 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.uassetstudio'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.uassetstudio'
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName '2.0.0'
+    }
+
+    signingConfigs {
+        release {
+            // CI 里从环境变量注入；本地缺省时回退到 debug 签名
+            def storePath = System.getenv('KEYSTORE_PATH')
+            if (storePath && file(storePath).exists()) {
+                storeFile file(storePath)
+                storePassword System.getenv('KEYSTORE_PASSWORD')
+                keyAlias System.getenv('KEY_ALIAS')
+                keyPassword System.getenv('KEY_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (System.getenv('KEYSTORE_PATH')) {
+                signingConfig signingConfigs.release
+            }
+        }
+        debug {
+            applicationIdSuffix '.debug'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // 把 web/ 打进 assets，离线可用
+    sourceSets {
+        main {
+            assets.srcDirs = ['src/main/assets']
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.webkit:webkit:1.10.0'
+}

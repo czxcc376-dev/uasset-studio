@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['18', '20', '22']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: 生成测试夹具
+        run: node scripts/make-fixture.mjs
+
+      - name: 单元 + 端到端测试
+        run: node --test test/
+
+      - name: 字节级回归（改一个 float 只能动 4 字节）
+        run: node test/byte-regression.mjs
+
+      - name: pak 往返测试
+        run: node test/pak.test.mjs
+
+  build-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 构建 Web 包
+        run: node scripts/build-web.mjs
+
+      - name: 校验 index.html 不含远端依赖
+        run: |
+          set -e
+          ! grep -q "xdnb886\|cfg.json\|kill switch\|__HP_ASSET\|__HP_VOICE" web/index.html
+          ! grep -q "data2.js" web/index.html
+          echo "index.html 无远端门禁 / 无第三方注入内容"
+
+      - name: 上传静态站点
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 语法检查（全部源码可解析）
+        run: |
+          set -e
+          for f in $(find src scripts test -name '*.js' -o -name '*.mjs'); do
+            node --check "$f" || { echo "语法错误: $f"; exit 1; }
+          done
+          echo "全部源码语法通过"
+
+      - name: MCP 工具清单自检
+        run: |
+          set -e
+          node -e "
+          import('./src/mcp/tools.js').then(m => {
+            const names = m.tools.map(t => t.name);
+            if (names.length < 30) { console.error('工具数异常:', names.length); process.exit(1); }
+            const dup = names.filter((n, i) => names.indexOf(n) !== i);
+            if (dup.length) { console.error('重复工具名:', dup); process.exit(1); }
+            for (const t of m.tools) {
+              if (!t.description || !t.inputSchema) { console.error('工具缺描述:', t.name); process.exit(1); }
+            }
+            console.log('工具数', names.length, '全部有描述与 schema');
+          });"

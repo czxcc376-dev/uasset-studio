@@ -1,0 +1,13 @@
+node_modules/
+*.log
+.mod.uasset
+.mod.uexp
+/tmp/
+.DS_Store
+# 测试用真实资产不入库（体积 + 版权）
+test/fixtures/*.uasset
+test/fixtures/*.uexp
+!test/fixtures/README.md
+
+# 原工程留档（含第三方内透资源与远端门禁代码，不入库）
+legacy/

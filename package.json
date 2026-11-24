@@ -1,0 +1,34 @@
+{
+  "name": "uasset-studio",
+  "version": "2.0.0",
+  "description": "UE4/UE5 .uasset/.uexp 编辑器内核 + MCP 服务器（AI 可直接读改资产）",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "uasset": "./src/cli/uasset.mjs"
+  },
+  "exports": {
+    ".": "./src/core/index.js",
+    "./mcp": "./src/mcp/server.js",
+    "./engine": "./src/core/engine.js"
+  },
+  "files": [
+    "src",
+    "web",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "split": "node scripts/split-legacy.mjs",
+    "build:web": "node scripts/build-web.mjs",
+    "build:apk": "bash scripts/build-apk.sh",
+    "test": "node --test test/",
+    "mcp": "node src/mcp/server.js",
+    "cli": "node src/cli/uasset.mjs",
+    "mcp:http": "node src/mcp/server.js --http 8787"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

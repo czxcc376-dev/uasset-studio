@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 生成夹具并跑全部测试
+        run: |
+          node scripts/make-fixture.mjs
+          node --test test/
+          node test/byte-regression.mjs
+          node test/pak.test.mjs
+
+      - name: 构建 Web 包
+        run: node scripts/build-web.mjs
+
+      - name: 打包 web 分发包
+        run: |
+          mkdir -p dist
+          cd web && zip -r ../dist/uasset-studio-web.zip . -x '*.map'
+          cd ..
+
+      - name: 打包 npm 分发包
+        run: npm pack --pack-destination dist || true
+
+      - name: 生成校验和
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt || true
+          cat SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: dist/*
+
+      - name: 发布
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
