@@ -43,7 +43,9 @@ jobs:
       - name: 生成测试夹具并跑测试
         run: |
           node scripts/make-fixture.mjs
-          node --test test/
+          node --test test/*.test.mjs
+          node test/e2e.mjs
+          node test/byte-regression.mjs
 
       - name: 准备签名（release 且配置了 secrets）
         if: ${{ inputs.mode == 'release' || startsWith(github.ref, 'refs/tags/v') }}

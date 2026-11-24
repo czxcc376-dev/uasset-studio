@@ -23,14 +23,14 @@ jobs:
       - name: 生成测试夹具
         run: node scripts/make-fixture.mjs
 
-      - name: 单元 + 端到端测试
-        run: node --test test/
+      - name: 单元测试（MCP 全链路 + pak 往返）
+        run: node --test test/*.test.mjs
 
-      - name: 字节级回归（改一个 float 只能动 4 字节）
+      - name: 端到端（解析 → 改值 → 保存 → 重载）
+        run: node test/e2e.mjs
+
+      - name: 字节级回归（改一个 float 只能动目标字节）
         run: node test/byte-regression.mjs
-
-      - name: pak 往返测试
-        run: node test/pak.test.mjs
 
   build-web:
     runs-on: ubuntu-latest

@@ -904,8 +904,16 @@ export function coerceValue(prop, value, ensureName) {
       return typeof value === 'string' ? value.toLowerCase() === 'true' || value === '1' : !!value;
     case 'Int8Property': case 'Int16Property': case 'IntProperty': case 'Int64Property':
     case 'UInt16Property': case 'UInt32Property': case 'UInt64Property':
-    case 'FloatProperty': case 'DoubleProperty':
+    case 'FloatProperty':
+      // 写回时按 float32 落盘，内存里也归一化成 float32，
+      // 否则「改 0.45 → 读回 0.449999988」会让调用方以为写入失败。
+      return Math.fround(typeof value === 'number' ? value : Number(value));
+    case 'DoubleProperty':
       return typeof value === 'number' ? value : Number(value);
+    case 'Int8Property_': case 'Int16Property_': case 'IntProperty_': case 'Int64Property_':
+      return Math.trunc(typeof value === 'number' ? value : Number(value));
+    case 'UInt16Property_': case 'UInt32Property_': case 'UInt64Property_':
+      return Math.trunc(typeof value === 'number' ? value : Number(value)) >>> 0;
     case 'StrProperty': case 'AnsiStrProperty': case 'Utf8StrProperty':
       return String(value);
     case 'NameProperty':

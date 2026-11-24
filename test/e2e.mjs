@@ -32,21 +32,34 @@ console.log('  大小: uasset %d%s', info.sizes.uasset, info.sizes.uexp ? ` + ue
 assert.ok(info.tables.exports > 0, '导出表不能为空');
 assert.ok(info.tables.names > 0, '名称表不能为空');
 
-// 选第一个有属性的导出作为目标
-const target = pkg.exportList({ limit: 50 }).items.find((e) => e.serialSize > 0);
-assert.ok(target, '至少要有一个非空导出');
+// 优先选「含顶层数值属性」的导出（这样能真正测到定长编辑路径）；
+// 都没有才退回第一个能解析出属性的导出。
+let target = null;
+let props = null;
+let fallback = null;
+for (const e of pkg.exportList({ limit: 200 }).items) {
+  if (!e.serialSize) continue;
+  let p;
+  try { p = pkg.parseExport(e.index); } catch { continue; }
+  if (!Array.isArray(p) || p.length === 0) continue;
+  if (!fallback) fallback = { target: e, props: p };
+  if (p.some((x) => x.type === 'FloatProperty' || x.type === 'IntProperty')) {
+    target = e; props = p; break;
+  }
+}
+if (!target && fallback) { target = fallback.target; props = fallback.props; }
+assert.ok(target, '至少要有一个能解析出属性的导出');
 console.log('目标导出: %s (#%d, %d 字节)', target.name, target.index, target.serialSize);
-
-const props = pkg.parseExport(target.index);
-assert.ok(Array.isArray(props) && props.length > 0, '目标导出应能解析出属性');
 console.log('属性数: %d', props.length);
 
-// 找一个可定长编辑的数值属性
+// 找一个可定长编辑的数值属性（可能在嵌套结构里，这里只看顶层）
 const numeric = props.find((p) => p.type === 'FloatProperty' || p.type === 'IntProperty');
 if (numeric) {
   const p = `${target.name}.${numeric.name}`;
   const before = pkg.get(p).value;
-  const next = numeric.type === 'FloatProperty' ? before + 0.25 : before + 1;
+  // FloatProperty 落盘是 float32，比较时也要按 float32 归一
+  const raw = numeric.type === 'FloatProperty' ? before + 0.25 : before + 1;
+  const next = numeric.type === 'FloatProperty' ? Math.fround(raw) : raw;
   const r = pkg.set(p, next);
   console.log('改值: %s  %s → %s  (mode=%s)', p, r.before, r.after, r.mode || 'rebuild');
   assert.strictEqual(pkg.get(p).value, next, '内存中的值应立即更新');
@@ -54,10 +67,14 @@ if (numeric) {
 
 const saved = pkg.save();
 assert.deepStrictEqual(saved.verification.problems, [], `保存自检不应有问题: ${saved.verification.problems}`);
-console.log('保存: uasset %d, uexp %d, 重建 %d / 复制 %d / 失败 %d',
-  saved.report.sizes.uasset, saved.report.sizes.uexp || 0,
-  saved.report.rebuilt, saved.report.copied, saved.report.failed);
-assert.strictEqual(saved.report.failed, 0, '不应有导出重建失败');
+if (saved.unchanged) {
+  console.log('保存: 无改动（该导出没有可定长编辑的顶层数值属性），跳过重建检查');
+} else {
+  console.log('保存: uasset %d, uexp %d, 重建 %d / 复制 %d / 失败 %d',
+    saved.report.sizes.uasset, saved.report.sizes.uexp || 0,
+    saved.report.rebuilt, saved.report.copied, saved.report.failed);
+  assert.strictEqual(saved.report.failed, 0, '不应有导出重建失败');
+}
 
 // 写盘并重载，确认真的能读回来
 const outU = '/tmp/_e2e.uasset';

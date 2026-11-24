@@ -21,9 +21,9 @@ jobs:
       - name: 生成夹具并跑全部测试
         run: |
           node scripts/make-fixture.mjs
-          node --test test/
+          node --test test/*.test.mjs
+          node test/e2e.mjs
           node test/byte-regression.mjs
-          node test/pak.test.mjs
 
       - name: 构建 Web 包
         run: node scripts/build-web.mjs

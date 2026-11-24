@@ -24,7 +24,7 @@
     "split": "node scripts/split-legacy.mjs",
     "build:web": "node scripts/build-web.mjs",
     "build:apk": "bash scripts/build-apk.sh",
-    "test": "node --test test/",
+    "test": "node --test test/*.test.mjs && node test/e2e.mjs && node test/byte-regression.mjs",
     "mcp": "node src/mcp/server.js",
     "cli": "node src/cli/uasset.mjs",
     "mcp:http": "node src/mcp/server.js --http 8787"
