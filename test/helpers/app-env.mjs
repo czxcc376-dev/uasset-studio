@@ -95,7 +95,17 @@ export function createAppEnv({ AndroidMCP, AndroidFS, loadBundle = true } = {}) 
     setItem: (k, v) => storage.set(k, String(v)),
     removeItem: (k) => storage.delete(k),
   };
-  g.navigator = { userAgent: 'node-webview-stub' };
+  // Node 21+ 的 navigator 是只读 getter（可配置），直接赋值会抛错，必须 defineProperty；
+  // 万一环境把它设成不可配置，就退回使用内置的，不影响被测逻辑。
+  try {
+    Object.defineProperty(g, 'navigator', {
+      value: { userAgent: 'node-webview-stub' },
+      configurable: true,
+      writable: true,
+    });
+  } catch (e) {
+    /* 保留环境自带的 navigator */
+  }
   g.location = { search: '', href: 'file:///android_asset/index.html', pathname: '/index.html' };
   g.requestAnimationFrame = (cb) => setTimeout(cb, 0);
   g.alert = () => {};
