@@ -118,7 +118,7 @@ MCP 侧走 `pak_open` → `pak_list` → `pak_extract` → 改资产 → `pak_re
 | 代码结构 | 单文件 8832 行，UI 与引擎混在一起 | `core/` 模块化，`web/ui.js` 与引擎分离 |
 | 全局状态 | `globalNameMap` 等十几个全局变量 | 每个 `Package` 实例独立，可并发 |
 | 远端门禁 | 拉 `cfg.json` + 内置 HMAC 密钥 + 远程停用 + 到期日 | **整段移除**，完全离线 |
-| 内嵌第三方资源 | `__HP_ASSET`(4MB) + `__HP_VOICE`(5MB) + 内透脚本 | **移除**，`index.html` 从 9.3MB → 71KB |
+| 内嵌第三方资源 | `__HP_ASSET`(4MB) + `__HP_VOICE`(5MB) + 内透脚本 | **移除**，`index.html` 从 9.3MB → 72KB |
 | 缺失依赖 | `viewer.html` 引用不存在的 `data2.js` | 移除该引用 |
 | pak | 不支持 | 完整读写 |
 | 结构体数组 | 定长切分，变长数组从第 2 个元素起错位 | 按 `None` 边界变长解析 |
@@ -140,16 +140,47 @@ MCP 侧走 `pak_open` → `pak_list` → `pak_extract` → 改资产 → `pak_re
 ## 验证
 
 ```bash
-npm test          # 端到端：解析 → 改值 → 保存 → 重解析
+npm test                    # 单元 + 端到端 + 字节级回归
+npm run verify:web          # Web 产物洁净性（无远端依赖）
+node test/full-regress.mjs <真实资产.uasset>   # 真实资产 20 项检查
 ```
 
-字节级回归：只改一个 float，输出的 `.uexp` 与原始文件**仅差 4 字节**（该 float 本身），
-文件大小不变，其余字节完全一致。
+### 字节级回归
+
+改一个 float，输出的 `.uexp` 与原始文件**仅差目标那几个字节**，文件大小不变：
 
 ```
-orig 20355  new 20355  diffBytes 4
-ranges 2163..2166
+✓ 定长编辑：仅 4 字节变化，重载读回 0.75
+✓ 布尔编辑：仅 1 字节变化
+✓ 整型编辑：仅 4 字节变化
+✓ 结构体分量：仅 2 字节变化
+✓ 变长字符串：uexp 194 → 209，重载读回正确
 ```
+
+真实资产（BP_Rifle_AUG，561 名称 / 148 导入 / 23 导出）实测：
+
+```
+✓ 文件大小不变 20355
+✓ 只动目标字节 4 字节 @ 396,397,398,399
+✓ 自检通过 []
+✓ 重建 1 个 / 复制 22 个
+✓ 重载读回 0.75
+```
+
+### full-regress 的 20 项检查
+
+| 组 | 检查内容 |
+| --- | --- |
+| 定长编辑 | 文件大小不变、只动目标字节、自检通过、重建/复制计数、重载读回 |
+| 嵌套变长数组 | 8 个元素全部解析（非原始块）、header 识别为总长格式、改嵌套元素后自检、读回 |
+| 名称表扩容 | 名称数不变、totalHeaderSize 不变、值写入成功、所有导出偏移仍有效 |
+| 批量改值 | dryRun 匹配、dryRun 不落地、实际写入、保存成功 |
+| pak 端到端 | 建包读回、压缩生效、包内资产可解析且值正确 |
+
+### CI
+
+GitHub Actions 跑三套 Node（18 / 20 / 22）+ lint + Web 构建，全部绿；
+Android workflow 产出 APK（3.1 MB，无 INTERNET 权限，assets 内含 index.html/app.js）。
 
 ## 目录
 
