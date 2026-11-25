@@ -75,6 +75,54 @@ HTTP 模式（方便远程/容器）：`node src/mcp/server.js --http 8787`，�
 | 批量 | `uasset_scan_dir` `uasset_query` |
 | pak | `pak_open` `pak_list` `pak_read` `pak_extract` `pak_replace` |
 
+### 两种运行形态
+
+| 形态 | 跑在哪 | 文件访问 | 工具数 |
+| --- | --- | --- | --- |
+| 桌面 / 服务器 | `node src/mcp/server.js` | 直接读目录 | 36 |
+| **App 内** | 手机 App → 设置 → MCP 服务 | SAF 授权的文件 | 25 |
+
+App 内的 MCP 是**在 App 里跑 HTTP 服务**，AI 客户端（RikkaHub、Claude Desktop 走桥接等）
+填一个地址就能连，不需要电脑、不需要 Termux：
+
+```
+App 设置 → MCP 服务（给 AI 用）
+├── 启用本地 MCP          ← 打开
+├── 端口  8787
+├── 允许局域网访问         ← 关（只监听 127.0.0.1）/ 开（手机同网段可连）
+├── 运行中 · 端点 http://127.0.0.1:8787/mcp
+├── 添加可读文件（授权给 AI）    ← 选 .uasset/.uexp，授权持久化
+├── 选择保存位置（AI 写盘用）    ← 给 AI 一个可写目标
+└── 复制 MCP 客户端配置          ← 输出可直接粘的 JSON
+```
+
+架构上刻意让 Java 只做字节搬运：
+
+```
+AI 客户端 ──HTTP──> McpHttpServer.java（手写 HTTP/1.1，258 行）
+                        │ evaluateJavascript + CountDownLatch
+                        ▼
+                   WebView 里的 mcp-app.js（JSON-RPC + 25 个工具）
+                        │
+                        ▼
+                   Package / Pak（与 CLI 完全同一套解析代码）
+```
+
+这样 App 与 CLI 的行为不会分叉 —— 改一处引擎，两边同时生效。
+
+App 内工具清单（25 个）：
+
+| 分组 | 工具 |
+| --- | --- |
+| 会话 | `app_status` `app_list_files` `app_open_file` `app_close` |
+| 浏览 | `uasset_info` `uasset_list_exports` `uasset_list_names` `uasset_tree` `uasset_get` `uasset_search` `uasset_blueprint` |
+| 编辑 | `uasset_set` `uasset_set_many` `uasset_set_by_query` `uasset_batch` `uasset_validate` |
+| 安全网 | `uasset_snapshot` `uasset_restore` |
+| 二进制 | `uasset_hexdump` `uasset_patch_bytes` |
+| 输出 | `uasset_export_base64` `uasset_export_json` `uasset_save` `uasset_help` |
+
+没有路径/目录概念，所以 `scan_dir`、`pak_*` 只在桌面版提供。
+
 ### 路径语法
 
 ```
@@ -124,6 +172,7 @@ MCP 侧走 `pak_open` → `pak_list` → `pak_extract` → 改资产 → `pak_re
 | 结构体数组 | 定长切分，变长数组从第 2 个元素起错位 | 按 `None` 边界变长解析 |
 | 快照 / 回滚 | 无 | 深拷贝解析树 |
 | 保存自检 | 只查越界 | 越界 + 名称表完整性 + 重解析改动导出 |
+| 给 AI 用 | 无 | 桌面 MCP（36 工具）+ App 内 MCP（25 工具，设置面板可开关） |
 
 ### 修掉的两个真实缺陷
 
@@ -176,6 +225,22 @@ node test/full-regress.mjs <真实资产.uasset>   # 真实资产 20 项检查
 | 名称表扩容 | 名称数不变、totalHeaderSize 不变、值写入成功、所有导出偏移仍有效 |
 | 批量改值 | dryRun 匹配、dryRun 不落地、实际写入、保存成功 |
 | pak 端到端 | 建包读回、压缩生效、包内资产可解析且值正确 |
+
+### App 侧（无需模拟器）
+
+App 内的 MCP 与设置面板都是 WebView 里的普通 JS，用一个足够像的 DOM stub + 假原生桥
+就能在 Node 里验证：
+
+```
+✓ 协议：initialize / tools/list / ping / 未知方法 / 坏 JSON
+✓ 资产登记 + 只读工具（真实夹具字节）
+✓ 编辑：set / 批量 / dryRun / 整批回滚 / 快照恢复
+✓ 导出：save 自检 + base64 往返（导出→重开读回同值）
+✓ 错误路径：未知 session / 属性 / 工具 / 缺参数都给可执行提示
+✓ 设置面板：开关→调原生 start / 改端口自动重启 / 非法端口拒绝并弹回
+  / 复制出合法客户端配置 / 文件授权列表渲染与移除
+✓ 非 App 环境：提示改用 Node 版，不假装可用
+```
 
 ### CI
 

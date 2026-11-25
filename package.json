@@ -29,7 +29,8 @@
     "cli": "node src/cli/uasset.mjs",
     "mcp:http": "node src/mcp/server.js --http 8787",
     "verify:web": "node scripts/verify-web.mjs",
-    "test:full": "node scripts/make-fixture.mjs && npm test && node scripts/verify-web.mjs"
+    "test:full": "node scripts/make-fixture.mjs && npm test && node scripts/verify-web.mjs",
+    "lint:java": "node scripts/lint-java.mjs"
   },
   "dependencies": {},
   "devDependencies": {}

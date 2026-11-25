@@ -2060,6 +2060,14 @@ async function processFiles(files) {
             globalExports = objectReader.readExports(globalHeader.exportCount);
         }
 
+        // 登记到 App 内 MCP，AI 可以直接操作这份资产
+        try {
+            if (window.__APP_MCP && window.__APP_MCP.register) {
+                const sid = window.__APP_MCP.register(uassetFile.name, globalUAssetBuffer, globalUExpBuffer);
+                if (sid) debugLog(`[MCP] 资产已登记为 ${sid}`);
+            }
+        } catch (e) { console.warn('[MCP] 登记失败', e); }
+
         // Add Name Map node at the top (before exports)
         const nameMapLi = document.createElement("li");
         nameMapLi.className = "namemap-node";

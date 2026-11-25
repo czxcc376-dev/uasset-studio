@@ -1,7 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- 离线编辑器：不申请网络权限 -->
+    <!--
+        资产编辑本身完全离线。
+        INTERNET 仅用于内嵌 MCP 服务监听本机回环端口（127.0.0.1），
+        默认不对外网开放；只有用户在设置里显式打开「允许局域网」时才绑定 0.0.0.0。
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"

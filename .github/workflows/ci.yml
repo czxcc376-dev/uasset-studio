@@ -68,6 +68,9 @@ jobs:
           done
           echo "全部源码语法通过"
 
+      - name: Java 静态检查（括号/package/类名/import）
+        run: node scripts/lint-java.mjs
+
       - name: MCP 工具清单自检
         run: |
           set -e

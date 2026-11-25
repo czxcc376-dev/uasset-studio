@@ -1,17 +1,18 @@
 /*!
  * uasset-studio web bundle — 自动生成，请勿直接编辑
- * 源：src/core/{log,engine}.js + src/web/ui.js
+ * 源：src/core/{log,engine,names,serializer,package}.js + src/web/{ui,mcp-app}.js
  * 构建：node scripts/build-web.mjs
  */
 (function () {
 "use strict";
 
+/* ==================== log (src/core/log.js) ==================== */
 /* eslint-disable */
 /**
  * log.js — 调试输出。原实现直接读 window/localStorage，在 Node 下会抛错，
  * 这里做了环境判定，语义不变（默认静默，只有 debug=true 才输出）。
  */
-const g = typeof globalThis !== "undefined" ? globalThis : {};
+const g = typeof globalThis !== 'undefined' ? globalThis : {};
 function readFlag(key, urlKey) {
   try {
     const loc = g.location;
@@ -50,6 +51,8 @@ function debugInfo(message) {
     }
 }
 
+
+/* ==================== engine (src/core/engine.js) ==================== */
 /* eslint-disable */
 /**
  * engine.js — UE4/UE5 .uasset / .uexp 二进制读写引擎（无 DOM，浏览器 + Node 通用）
@@ -4095,7 +4098,1576 @@ var UAssetPropertyWriter = class _UAssetPropertyWriter {
 
 
 
-// ---- 模块化 core → 全局符号（原 UI 代码按经典脚本编写，需要这些全局名）----
+/* ==================== names (src/core/names.js) ==================== */
+/* eslint-disable */
+/**
+ * names.js — FName 表（NameMap）编解码、UE hash、以及名称表扩容。
+ *
+ * 与原工具 growUAssetNameMap 的差异：
+ *   - 抽成纯函数，用 ctx 传状态（无全局变量）
+ *   - 未改动条目按原始字节拷贝（保留原 hash 与 UTF-16 编码），改动/新增条目才重编码
+ *   - 扩容后统一把「位于名称表之后的所有绝对偏移」按 delta 后移，并同步 totalHeaderSize / nameCount
+ */
+
+/** UE4 FName hash 依赖表 */
+const DEP_TABLE = new Uint32Array([
+  0x00000000, 0x04c11db7, 0x09823b6e, 0x0d4326d9, 0x130476dc, 0x17c56b6b, 0x1a864db2, 0x1e475005,
+  0x2608edb8, 0x22c9f00f, 0x2f8ad6d6, 0x2b4bcb61, 0x350c9b64, 0x31cd86d3, 0x3c8ea00a, 0x384fbdbd,
+]);
+
+let CRC_TABLE = null;
+
+function ensureCrcTable() {
+  if (!CRC_TABLE) {
+    CRC_TABLE = new Int32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let c = i;
+      for (let j = 0; j < 8; j++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      CRC_TABLE[i] = c;
+    }
+  }
+}
+
+function crc32Bytes(bytes) {
+  ensureCrcTable();
+  let crc = -1;
+  for (let i = 0; i < bytes.length; i++) crc = (crc >>> 8) ^ CRC_TABLE[(crc ^ bytes[i]) & 0xff];
+  return (crc ^ -1) >>> 0;
+}
+
+/** 与 UE4 UAssetAPI 一致的 FName hash（UE4.23+ 名称表每条带 4 字节 hash） */
+function nameHash(str) {
+  ensureCrcTable();
+  let h = 0;
+  for (let i = 0; i < str.length; i++) {
+    let c = str.charCodeAt(i);
+    if (c >= 97 && c <= 122) c -= 32;
+    const bytes = [];
+    if (c < 0x80) bytes.push(c);
+    else if (c < 0x800) bytes.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f));
+    else if (c < 0x10000) bytes.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+    else bytes.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 0x3f), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+    for (let k = 0; k < bytes.length; k++) h = ((h >>> 8) & 0x00ffffff) ^ DEP_TABLE[(h ^ bytes[k]) & 0xff];
+  }
+  let crc = 0xffffffff;
+  for (let j = 0; j < str.length; j++) {
+    let ch = str.charCodeAt(j);
+    for (let n = 0; n < 4; n++) {
+      crc = (crc >>> 8) ^ CRC_TABLE[(crc ^ (ch & 0xff)) & 0xff];
+      ch >>= 8;
+    }
+  }
+  crc = ~crc >>> 0;
+  return ((h & 0xffff) | ((crc & 0xffff) << 16)) >>> 0;
+}
+
+/** 名称表在磁盘上的结束偏移 */
+function nameMapEndOffset(bytes, nameOffset, count, hasHash) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let pos = nameOffset;
+  for (let i = 0; i < count; i++) {
+    const len = view.getInt32(pos, true);
+    pos += 4;
+    pos += len < 0 ? -len * 2 : len;
+    if (hasHash) pos += 4;
+  }
+  return pos;
+}
+
+/** 把一条 FName 编码成磁盘格式（ASCII 用正长度，非 ASCII 用 UTF-16LE 负长度） */
+function encodeNameEntry(name, hasHash, hashVal) {
+  const ascii = /^[\x00-\x7F]*$/.test(name);
+  const bodyLen = ascii ? name.length + 1 : (name.length + 1) * 2;
+  const out = new Uint8Array(4 + bodyLen + (hasHash ? 4 : 0));
+  const view = new DataView(out.buffer);
+  if (ascii) {
+    view.setInt32(0, name.length + 1, true);
+    for (let i = 0; i < name.length; i++) out[4 + i] = name.charCodeAt(i) & 0xff;
+    out[4 + name.length] = 0;
+  } else {
+    view.setInt32(0, -(name.length + 1), true);
+    let p = 4;
+    for (let j = 0; j < name.length; j++) {
+      const code = name.charCodeAt(j);
+      out[p++] = code & 0xff;
+      out[p++] = (code >> 8) & 0xff;
+    }
+    out[p++] = 0;
+    out[p++] = 0;
+  }
+  if (hasHash) view.setUint32(4 + bodyLen, (hashVal ?? 0) >>> 0, true);
+  return out;
+}
+
+/**
+ * 名称表扩容/改名后重建 .uasset 头部区。
+ * @param {{uasset:Uint8Array, header:object, names:string[], originalNames:string[]}} ctx
+ * @returns {{uasset:Uint8Array, header:object, delta:number}}
+ */
+function growNameMap(ctx) {
+  const header = ctx.header;
+  const oldBytes = ctx.uasset;
+  const nameOffset = header.nameOffset;
+  const hasHash = header.fileVersionUE4 >= 504;
+  const oldCount = header.nameCount;
+  const mapEnd = nameMapEndOffset(oldBytes, nameOffset, oldCount, hasHash);
+
+  const view0 = new DataView(oldBytes.buffer, oldBytes.byteOffset, oldBytes.byteLength);
+  const oldSpans = [];
+  let q = nameOffset;
+  for (let i = 0; i < oldCount; i++) {
+    const start = q;
+    const len = view0.getInt32(q, true);
+    q += 4;
+    q += len < 0 ? -len * 2 : len;
+    if (hasHash) q += 4;
+    oldSpans.push([start, q]);
+  }
+
+  const entries = [];
+  let newLen = 0;
+  for (let i = 0; i < ctx.names.length; i++) {
+    let e;
+    if (i < oldCount && ctx.names[i] === ctx.originalNames[i]) {
+      e = oldBytes.subarray(oldSpans[i][0], oldSpans[i][1]);
+    } else {
+      e = encodeNameEntry(ctx.names[i] || '', hasHash, hasHash ? nameHash(ctx.names[i] || '') : null);
+    }
+    entries.push(e);
+    newLen += e.length;
+  }
+
+  const origLen = mapEnd - nameOffset;
+  if (newLen < origLen) {
+    entries.push(new Uint8Array(origLen - newLen)); // 只变短时补齐，保持后续结构不动
+    newLen = origLen;
+  }
+  const delta = newLen - origLen;
+  const tail = oldBytes.subarray(mapEnd);
+  const out = new Uint8Array(nameOffset + newLen + tail.length);
+  out.set(oldBytes.subarray(0, nameOffset), 0);
+  let p = nameOffset;
+  for (const e of entries) {
+    out.set(e, p);
+    p += e.length;
+  }
+  out.set(tail, nameOffset + newLen);
+
+  const view = new DataView(out.buffer);
+  const updated = { ...header, nameCount: ctx.names.length, totalHeaderSize: header.totalHeaderSize + delta };
+  const positions = header.offsetPositions || {};
+  const shifted = {};
+  for (const key of Object.keys(positions)) {
+    const fieldPos = positions[key];
+    if (typeof fieldPos !== 'number') continue;
+    if (key === 'nameOffset' || key === 'totalHeaderSize') continue;
+    if (fieldPos + 4 > out.length) continue;
+    const val = view.getInt32(fieldPos, true);
+    if (val >= mapEnd && val !== 0) {
+      view.setInt32(fieldPos, val + delta, true);
+      shifted[key] = val + delta;
+    }
+  }
+  Object.assign(updated, shifted);
+  if (typeof positions.totalHeaderSize === 'number') {
+    view.setInt32(positions.totalHeaderSize, updated.totalHeaderSize, true);
+  }
+  if (typeof positions.nameOffset === 'number') {
+    view.setInt32(positions.nameOffset - 4, ctx.names.length, true);
+  }
+  return { uasset: out, header: updated, delta };
+}
+
+
+/* ==================== serializer (src/core/serializer.js) ==================== */
+/* eslint-disable */
+/**
+ * serializer.js — 把内存中的资产写回 .uasset / .uexp。
+ *
+ * 与原工具 rebuildUexp + growUAssetNameMap + patchExportTableForNewOffsets 等价，
+ * 但整理成单一函数、无全局状态，并额外提供：
+ *   - 单文件资产（无 .uexp）的完整重建支持
+ *   - 每个导出重建后的自检（写出的字节数 == 记录 size）
+ *   - 结构化 report，便于 MCP/CLI 直接展示差异
+ */
+
+
+/** 导出表条目大小（随版本变化），用于回填 serialSize / serialOffset */
+function exportEntrySize(ver) {
+  return (
+    28 + // ClassIndex/ObjectName/OuterIndex/SuperIndex/TemplateIndex
+    (ver >= 508 ? 16 : 8) + // ObjectFlags
+    12 +
+    16 +
+    4 +
+    (ver >= 365 ? 4 : 0) +
+    (ver >= 465 ? 4 : 0) +
+    (ver >= 507 ? 20 : 0)
+  );
+}
+
+/**
+ * @param {object} ctx {uasset, uexp, header, names, originalNames, imports, exports}
+ * @param {{rebuildAll?:boolean, debug?:boolean}} opts
+ */
+function serializePackage(ctx, opts = {}) {
+  const { rebuildAll = false, debug = false } = opts;
+  const header0 = ctx.header;
+  const src = ctx.uexp || ctx.uasset;
+  const base = header0.totalHeaderSize;
+
+  const report = {
+    exports: [],
+    rebuilt: 0,
+    copied: 0,
+    failed: 0,
+    nameMapDelta: 0,
+    exportTablePatched: 0,
+    tailBytes: 0,
+    sizes: {},
+  };
+
+  // ---- 1. 名称表变更（新增/改名）先把头部区重建好，后续偏移都基于新头部 ----
+  let uasset = ctx.uasset;
+  let header = header0;
+  if (ctx.namesDirty || ctx.names.length !== ctx.originalNames.length) {
+    const r = growNameMap({ uasset, header, names: ctx.names, originalNames: ctx.originalNames });
+    uasset = r.uasset;
+    header = r.header;
+    report.nameMapDelta = r.delta;
+  }
+
+  // ---- 2. 逐导出写出（只重建改动过的；其余按原始字节搬运） ----
+  const stream = new UAssetBinaryWriter(Math.max(1 << 20, src.length + (1 << 16)));
+  const propWriter = new UAssetPropertyWriter(stream, ctx.names, debug);
+  const offsets = new Map();
+
+  let maxOriginalEnd = 0;
+  for (const exp of ctx.exports) {
+    const end = exp.serialOffset + Math.max(0, exp.serialSize);
+    if (end > maxOriginalEnd) maxOriginalEnd = end;
+  }
+  maxOriginalEnd -= base;
+
+  for (let i = 0; i < ctx.exports.length; i++) {
+    const exp = ctx.exports[i];
+    let original = null;
+    if (exp.serialSize > 0) {
+      const rel = exp.serialOffset - base;
+      if (rel >= 0 && rel + exp.serialSize <= src.length) {
+        original = src.subarray(rel, rel + exp.serialSize);
+      }
+    }
+
+    const start = stream.getPosition();
+    const shouldRebuild = exp.__raw ? true : rebuildAll || (exp.isModified === true && Array.isArray(exp.properties));
+
+    if (exp.__raw) {
+      stream.writeBytes(exp.__raw);
+      report.rebuilt++;
+    } else if (shouldRebuild && exp.properties) {
+      try {
+        writeExportPayload(propWriter, stream, exp);
+        report.rebuilt++;
+      } catch (e) {
+        if (original) stream.writeBytes(original);
+        report.failed++;
+        report.exports.push({ index: i, name: exp.objectName, error: String(e && e.message || e), fellBack: !!original });
+        const end = stream.getPosition();
+        offsets.set(i, { offset: start, size: end - start });
+        continue;
+      }
+    } else if (original) {
+      stream.writeBytes(original);
+      report.copied++;
+    }
+
+    const end = stream.getPosition();
+    offsets.set(i, { offset: start, size: end - start });
+    report.exports.push({
+      index: i,
+      name: exp.objectName,
+      oldSize: exp.serialSize,
+      newSize: end - start,
+      rebuilt: !!shouldRebuild || !!exp.__raw,
+    });
+  }
+
+  // ---- 3. 尾部数据（AssetRegistry / 缩略图 / bulk / 对齐填充） ----
+  if (maxOriginalEnd >= 0 && maxOriginalEnd < src.length) {
+    const tail = src.subarray(maxOriginalEnd);
+    stream.writeBytes(tail);
+    report.tailBytes = tail.length;
+  }
+
+  let data = stream.getBuffer();
+
+  // 单文件资产：没有 .uexp 时补 4 字节对齐
+  if (!ctx.uexp) {
+    const pad = (4 - (data.length % 4)) % 4;
+    if (pad) {
+      const padded = new Uint8Array(data.length + pad);
+      padded.set(data);
+      data = padded;
+    }
+  }
+
+  // ---- 4. 把新的 offset/size 回填进导出表 ----
+  const headerLen = header.totalHeaderSize;
+  const prefix = uasset.subarray(0, headerLen);
+  const outAsset = new Uint8Array(headerLen + (ctx.uexp ? 0 : data.length));
+  outAsset.set(prefix, 0);
+  if (!ctx.uexp) outAsset.set(data, headerLen);
+
+  const view = new DataView(outAsset.buffer, outAsset.byteOffset, outAsset.byteLength);
+  const ver = header.fileVersionUE4;
+  const is64 = ver >= 508;
+  const entrySize = exportEntrySize(ver);
+  let pos = header.exportOffset;
+
+  for (let i = 0; i < ctx.exports.length; i++) {
+    const exp = ctx.exports[i];
+    const rec = offsets.get(i);
+    if (!rec) continue;
+    if (pos + entrySize > outAsset.length) break;
+    const newSize = rec.size;
+    const newOffset = headerLen + rec.offset;
+    if (newSize !== exp.serialSize || newOffset !== exp.serialOffset) report.exportTablePatched++;
+    exp.serialSize = newSize;
+    exp.serialOffset = newOffset;
+    if (is64) {
+      view.setBigInt64(pos + 28, BigInt(Math.floor(newSize)), true);
+      view.setBigInt64(pos + 36, BigInt(Math.floor(newOffset)), true);
+    } else {
+      view.setInt32(pos + 28, newSize | 0, true);
+      view.setInt32(pos + 32, newOffset | 0, true);
+    }
+    pos += entrySize;
+  }
+
+  report.sizes = {
+    uasset: outAsset.length,
+    uexp: ctx.uexp ? data.length : 0,
+    originalUasset: ctx.uasset.length,
+    originalUexp: ctx.uexp ? ctx.uexp.length : 0,
+  };
+
+  ctx.header = header;
+  return { uasset: outAsset, uexp: ctx.uexp ? data : null, header, report };
+}
+
+/** 写出单个导出的序列化载荷（属性表 + DataTable 行 + extraData） */
+function writeExportPayload(propWriter, stream, exp) {
+  if (exp.dtInfo && Array.isArray(exp.dtInfo.rows) && exp.dtInfo.rows.length > 0) {
+    const tableProps = exp.properties.filter((p) => !p.__row);
+    propWriter.writeProperties(tableProps);
+    stream.writeInt32(0);
+    stream.writeInt32(exp.dtInfo.rows.length);
+    for (const row of exp.dtInfo.rows) {
+      propWriter.writeFName(row.name);
+      propWriter.writeProperties(row.props);
+    }
+  } else {
+    propWriter.writeProperties(exp.properties);
+  }
+  if (exp.extraData && exp.extraData.length) stream.writeBytes(exp.extraData);
+}
+
+/**
+ * 保存后自检：重新解析头部/名称表/导出表，校验每个导出的区间落在数据流内，
+ * 并可选地重新解析被改动导出的属性表，确认能完整走完且结束符正确。
+ */
+function verifySaved(ctx, { uasset, uexp }, { deep = true } = {}) {
+  const problems = [];
+  try {
+    const h = new UAssetHeaderReader(uasset.buffer.slice(uasset.byteOffset, uasset.byteOffset + uasset.byteLength)).read();
+    if (!h) return { ok: false, problems: ['header 解析失败'] };
+    const nmr = new UAssetNameMapReader(uasset.buffer.slice(uasset.byteOffset, uasset.byteOffset + uasset.byteLength), h.fileVersionUE4);
+    const endOff = h.importOffset > 0 ? h.importOffset : h.exportOffset;
+    const names = nmr.read(h.nameOffset, h.nameCount, endOff);
+    if (names.length !== h.nameCount) problems.push(`名称表残缺 ${names.length}/${h.nameCount}`);
+
+    const objR = new UAssetObjectReader(uasset.buffer.slice(uasset.byteOffset, uasset.byteOffset + uasset.byteLength), names, h.fileVersionUE4);
+    let imports = [];
+    if (h.importCount) {
+      objR.setOffset(h.importOffset);
+      imports = objR.readImports(h.importCount);
+    }
+    objR.setOffset(h.exportOffset);
+    const exports = objR.readExports(h.exportCount);
+    const streamLen = uexp ? uexp.length : uasset.length - h.totalHeaderSize;
+
+    for (let i = 0; i < exports.length; i++) {
+      const e = exports[i];
+      if (e.serialSize <= 0) continue;
+      const rel = e.serialOffset - h.totalHeaderSize;
+      if (rel < 0) problems.push(`导出 #${i} offset < header`);
+      else if (rel + e.serialSize > streamLen) problems.push(`导出 #${i} 越界 (${rel}+${e.serialSize}>${streamLen})`);
+    }
+
+    if (deep && uexp) {
+      const pr = new UAssetPropertyReaderSafe(uasset, uexp, names, imports, exports, h);
+      for (const idx of ctx.modifiedExports || []) {
+        const e = exports[idx];
+        if (!e || e.serialSize <= 0) continue;
+        try {
+          const props = pr.read(idx);
+          if (!Array.isArray(props)) problems.push(`导出 #${idx} 解析失败`);
+        } catch (err) {
+          problems.push(`导出 #${idx} 解析异常: ${err.message || err}`);
+        }
+      }
+    }
+
+    return { ok: problems.length === 0, problems, header: { names: h.nameCount, exports: h.exportCount, totalHeaderSize: h.totalHeaderSize } };
+  } catch (e) {
+    return { ok: false, problems: [String(e && e.message || e)] };
+  }
+}
+
+/** 内部：按导出索引重新解析属性的小工具 */
+class UAssetPropertyReaderSafe {
+  constructor(uasset, uexp, names, imports, exports, header) {
+    this.uasset = uasset;
+    this.uexp = uexp;
+    this.names = names;
+    this.imports = imports;
+    this.exports = exports;
+    this.header = header;
+  }
+  read(idx) {
+    const ab = (u8) => u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
+    const r = new UAssetPropertyReader(
+      ab(this.uasset),
+      this.names,
+      this.imports,
+      this.exports,
+      this.header.totalHeaderSize,
+      this.uexp ? ab(this.uexp) : undefined,
+      false
+    );
+    r.setOffset(this.exports[idx].serialOffset);
+    return r.readProperties();
+  }
+}
+
+
+/* ==================== package (src/core/package.js) ==================== */
+/* eslint-disable */
+/**
+ * package.js — 面向「人/CLI/AI」的高层资产对象。
+ *
+ * 设计目标（相对原工具的三个改进）：
+ *   1) 无 DOM、无全局状态：一个 Package 实例 = 一次打开的资产，可并发持有多份
+ *   2) 路径寻址：`Default__BP_Rifle_AUG_C.WeaponAttrModifyConfigList[0].ModifyConfigID`
+ *      读/改/删都用同一个路径语法，MCP 与 CLI 共用
+ *   3) 写入前自动补名称表（原实现遇到未登记的 FName 会静默写 "None" 造成静默损坏）
+ */
+
+
+const toAB = (u8) => u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
+const asU8 = (b) => (b instanceof Uint8Array ? b : new Uint8Array(b));
+
+const NAME_TYPES = new Set(['NameProperty']);
+const OBJECT_TYPES = new Set([
+  'ObjectProperty', 'ClassProperty', 'InterfaceProperty', 'WeakObjectProperty',
+  'LazyObjectProperty', 'AssetObjectProperty', 'AssetClassProperty',
+]);
+
+class Package {
+  /**
+   * @param {{uasset:ArrayBuffer|Uint8Array, uexp?:ArrayBuffer|Uint8Array, name?:string}} input
+   */
+  constructor({ uasset, uexp, name = 'asset' }) {
+    this.name = name;
+    this.original = {
+      uasset: asU8(uasset).slice(),
+      uexp: uexp ? asU8(uexp).slice() : null,
+    };
+    this.#loadBuffers(this.original.uasset, this.original.uexp);
+    this.modifiedExports = new Set();
+    this.notes = [];
+  }
+
+  static fromBuffers(input) {
+    return new Package(input);
+  }
+
+  static async fromFile(uassetPath, { uexpPath } = {}) {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const uasset = await fs.readFile(uassetPath);
+    let uexp = null;
+    let uexpResolved = uexpPath;
+    if (!uexpResolved) {
+      const guess = uassetPath.replace(/\.uasset$/i, '.uexp');
+      try {
+        await fs.access(guess);
+        uexpResolved = guess;
+      } catch { /* 单文件资产 */ }
+    }
+    if (uexpResolved) uexp = await fs.readFile(uexpResolved);
+    return new Package({ uasset, uexp, name: path.basename(uassetPath) });
+  }
+
+  // ---------------------------------------------------------------- 内部
+  #loadBuffers(uassetU8, uexpU8) {
+    this.uasset = asU8(uassetU8);
+    this.uexp = uexpU8 ? asU8(uexpU8) : null;
+    this.header = new UAssetHeaderReader(toAB(this.uasset)).read();
+    const endOffset = this.header.importOffset > 0 ? this.header.importOffset : this.header.exportOffset;
+    this.names = new UAssetNameMapReader(toAB(this.uasset), this.header.fileVersionUE4)
+      .read(this.header.nameOffset, this.header.nameCount, endOffset);
+    this.originalNames = [...this.names];
+    this.namesDirty = false;
+
+    const objR = new UAssetObjectReader(toAB(this.uasset), this.names, this.header.fileVersionUE4);
+    this.imports = [];
+    this.exports = [];
+    if (this.header.importCount > 0) {
+      objR.setOffset(this.header.importOffset);
+      this.imports = objR.readImports(this.header.importCount);
+    }
+    if (this.header.exportCount > 0) {
+      objR.setOffset(this.header.exportOffset);
+      this.exports = objR.readExports(this.header.exportCount);
+    }
+    for (const exp of this.exports) {
+      exp.properties = null;
+      exp.isModified = false;
+      exp.__raw = null;
+    }
+  }
+
+  get isSplit() {
+    return !!this.uexp;
+  }
+
+  // ---------------------------------------------------------------- 概况
+  info() {
+    return {
+      name: this.name,
+      split: this.isSplit,
+      engine: {
+        fileVersionUE4: this.header.fileVersionUE4,
+        fileVersionUE5: this.header.fileVersionUE5 ?? null,
+        legacyFileVersion: this.header.legacyFileVersion,
+        licensee: this.header.fileVersionLicenseeUE4,
+        customVersions: this.header.customVersions || [],
+      },
+      sizes: {
+        uasset: this.uasset.length,
+        uexp: this.uexp ? this.uexp.length : 0,
+        totalHeaderSize: this.header.totalHeaderSize,
+      },
+      tables: {
+        names: this.header.nameCount,
+        imports: this.header.importCount,
+        exports: this.header.exportCount,
+      },
+      isDataTable: !!this.header.isDeltaForce,
+      dirty: this.modifiedExports.size > 0 || this.namesDirty,
+    };
+  }
+
+  // ---------------------------------------------------------------- 导出
+  exportList({ filter = '', offset = 0, limit = 200 } = {}) {
+    const needle = filter.toLowerCase();
+    const all = this.exports.map((e, i) => ({
+      index: i,
+      name: e.objectName,
+      className: this.#classNameOf(e),
+      outerIndex: e.outerIndex,
+      serialOffset: e.serialOffset,
+      serialSize: e.serialSize,
+      modified: this.modifiedExports.has(i),
+    }));
+    const rows = needle ? all.filter((r) => r.name.toLowerCase().includes(needle) || (r.className || '').toLowerCase().includes(needle)) : all;
+    return { total: rows.length, offset, limit, items: rows.slice(offset, offset + limit) };
+  }
+
+  #classNameOf(exp) {
+    try {
+      if (exp.classIndex < 0) {
+        const dep = this.imports[-exp.classIndex - 1];
+        return dep ? dep.objectName : `Import${exp.classIndex}`;
+      }
+      const dep = this.exports[exp.classIndex];
+      return dep ? dep.objectName : `Export${exp.classIndex}`;
+    } catch {
+      return null;
+    }
+  }
+
+  resolveExport(ref) {
+    if (typeof ref === 'number') return ref;
+    const s = String(ref);
+    const hash = s.match(/^#?(\d+)$/);
+    if (hash) return Number(hash[1]);
+    const exact = this.exports.findIndex((e) => e.objectName === s);
+    if (exact >= 0) return exact;
+    const ci = this.exports.findIndex((e) => e.objectName.toLowerCase() === s.toLowerCase());
+    if (ci >= 0) return ci;
+    const partial = this.exports.findIndex((e) => e.objectName.toLowerCase().includes(s.toLowerCase()));
+    if (partial >= 0) return partial;
+    throw new Error(`找不到导出: ${ref}`);
+  }
+
+  parseExport(ref) {
+    const idx = this.resolveExport(ref);
+    const exp = this.exports[idx];
+    if (exp.properties) return exp.properties;
+    if (exp.serialSize <= 0) {
+      exp.properties = [];
+      return exp.properties;
+    }
+    const reader = new UAssetPropertyReader(
+      toAB(this.uasset),
+      this.names,
+      this.imports,
+      this.exports,
+      this.header.totalHeaderSize,
+      this.uexp ? toAB(this.uexp) : undefined,
+      false
+    );
+    reader.setOffset(exp.serialOffset);
+    let props = reader.readProperties();
+
+    // DataTable：属性后跟行
+    if (this.header.isDeltaForce && props.length > 0 && props[0].name === 'RowStruct') {
+      try {
+        const dt = reader.readDataTableRows();
+        if (dt && dt.rows.length > 0) {
+          exp.dtInfo = dt;
+          for (const row of dt.rows) {
+            props.push({
+              name: row.name, type: 'StructProperty', structType: 'RowData',
+              size: 0, arrayIndex: 0, value: row.props, __row: true,
+            });
+          }
+        }
+      } catch (e) {
+        this.notes.push(`DataTable 行解析失败: ${e.message || e}`);
+      }
+    }
+    exp.properties = props;
+    return props;
+  }
+
+  parseAll() {
+    for (let i = 0; i < this.exports.length; i++) {
+      try { this.parseExport(i); } catch (e) { this.notes.push(`导出 #${i} 解析失败: ${e.message || e}`); }
+    }
+    return this;
+  }
+
+  // ---------------------------------------------------------------- 路径
+  /**
+   * 解析路径：`Export`、`#3`、`Export.Prop`、`Export.Prop[0].Sub`
+   * @returns {{exportIndex:number, tokens:Array<{type:'prop'|'index'|'key', value:any}>}}
+   */
+  parsePath(path) {
+    if (!path || typeof path !== 'string') throw new Error('路径不能为空');
+    const tokens = [];
+    let rest = path.trim();
+    let exportIndex = null;
+
+    const headHash = rest.match(/^#(\d+)/);
+    if (headHash) {
+      exportIndex = Number(headHash[1]);
+      rest = rest.slice(headHash[0].length);
+    } else {
+      // 导出名可能包含 '.'，因此优先整体匹配已知导出名（最长匹配）
+      const candidates = this.exports
+        .map((e, i) => ({ i, n: e.objectName }))
+        .filter((c) => rest === c.n || rest.startsWith(c.n + '.') || rest.startsWith(c.n + '['))
+        .sort((a, b) => b.n.length - a.n.length);
+      if (candidates.length) {
+        exportIndex = candidates[0].i;
+        rest = rest.slice(candidates[0].n.length);
+      }
+    }
+
+    const re = /\.([^.\[\]]+)|\[(\d+)\]|\["([^"]+)"\]|\[([^\[\]]+)\]/g;
+    let m;
+    while ((m = re.exec(rest))) {
+      if (m[1] !== undefined) tokens.push({ type: 'prop', value: m[1] });
+      else if (m[2] !== undefined) tokens.push({ type: 'index', value: Number(m[2]) });
+      else if (m[3] !== undefined) tokens.push({ type: 'key', value: m[3] });
+      else tokens.push({ type: 'key', value: m[4] });
+    }
+    if (rest.length && tokens.length === 0) throw new Error(`路径语法无法解析: ${rest}`);
+    if (exportIndex === null) throw new Error(`路径缺少导出名或 #索引（导出列表: ${this.exports.slice(0, 5).map((e) => e.objectName).join(', ')} ...）`);
+    return { exportIndex, tokens };
+  }
+
+  /**
+   * 读取路径指向的值。
+   * @returns {{path:string, exportIndex:number, exportName:string, kind:'export'|'property'|'element', type?:string, value?:any, size?:number, structName?:string, innerType?:string}}
+   */
+  get(path) {
+    const { exportIndex, tokens } = this.parsePath(path);
+    const exp = this.exports[exportIndex];
+    if (tokens.length === 0) {
+      return {
+        path,
+        exportIndex,
+        exportName: exp.objectName,
+        kind: 'export',
+        type: this.#classNameOf(exp) || 'Export',
+        value: {
+          objectName: exp.objectName,
+          className: this.#classNameOf(exp),
+          serialOffset: exp.serialOffset,
+          serialSize: exp.serialSize,
+          propertyCount: this.parseExport(exportIndex).length,
+        },
+        size: exp.serialSize,
+      };
+    }
+
+    let node = this.parseExport(exportIndex);
+    let owner = null;
+    let parent = null;
+    let last = null;
+
+    for (let i = 0; i < tokens.length; i++) {
+      const t = tokens[i];
+      if (t.type === 'prop') {
+        if (!Array.isArray(node)) {
+          if (node && typeof node === 'object' && t.value in node) {
+            parent = node;
+            last = t.value;
+            node = node[t.value];
+            continue;
+          }
+          throw new Error(`节点不是属性列表，无法取 .${t.value}`);
+        }
+        const found = node.find((p) => p && p.name === t.value);
+        if (!found) {
+          const near = node.filter((p) => p && typeof p.name === 'string' && p.name.toLowerCase().includes(String(t.value).toLowerCase())).slice(0, 5).map((p) => p.name);
+          throw new Error(`属性不存在: ${t.value}${near.length ? `（相近: ${near.join(', ')}）` : ''}`);
+        }
+        owner = found;
+        parent = node;
+        last = t.value;
+        node = found.value;
+      } else {
+        const idx = t.type === 'index' ? t.value : t.value;
+        if (!Array.isArray(node)) throw new Error(`[${t.value}] 用于非数组节点`);
+        if (t.type === 'index' && (idx < 0 || idx >= node.length)) throw new Error(`索引越界: ${idx} (长度 ${node.length})`);
+        parent = node;
+        last = idx;
+        node = node[idx];
+        owner = node && node.name && node.type ? node : owner;
+      }
+    }
+
+    const isPropList = Array.isArray(node) && node.length && node[0] && node[0].name && node[0].type;
+    return {
+      path,
+      exportIndex,
+      exportName: exp.objectName,
+      kind: owner ? 'property' : 'element',
+      type: owner ? owner.type : Array.isArray(node) ? 'Array' : typeof node,
+      structName: owner && owner.structName,
+      innerType: owner && owner.innerType,
+      arrayIndex: owner && owner.arrayIndex,
+      size: owner ? owner.size : undefined,
+      value: isPropList ? summarizeProps(node) : node,
+    };
+  }
+
+  /**
+   * 修改路径指向的值（自动按属性类型归一化）。
+   * @returns {{path:string, before:any, after:any, type:string}}
+   */
+  set(path, value) {
+    const { exportIndex, tokens } = this.parsePath(path);
+    if (tokens.length === 0) throw new Error('不能直接替换整个导出，请指定属性路径');
+    const exp = this.exports[exportIndex];
+    let node = this.parseExport(exportIndex);
+    const chain = []; // 沿途的 prop 节点，全部标记为已修改，避免上层走 _rawBytes 快速通道
+
+    for (let i = 0; i < tokens.length; i++) {
+      const t = tokens[i];
+      const isLast = i === tokens.length - 1;
+      if (t.type === 'prop') {
+        if (!Array.isArray(node)) {
+          if (node && typeof node === 'object' && t.value in node) {
+            if (isLast) {
+              const before = node[t.value];
+              node[t.value] = value;
+              markChain(chain);
+              this.#touch(exportIndex, exp);
+              return { path, before, after: value, type: typeof value };
+            }
+            node = node[t.value];
+            continue;
+          }
+          throw new Error(`节点不是属性列表，无法取 .${t.value}`);
+        }
+        const found = node.find((p) => p && p.name === t.value);
+        if (!found) throw new Error(`属性不存在: ${t.value}`);
+        chain.push(found);
+        if (isLast) {
+          const before = found.value;
+          const next = coerceValue(found, value, (n) => this.ensureName(n));
+          if (Array.isArray(next)) ensureNamesDeep(next, (n) => this.ensureName(n));
+          const patched = this.#tryPatchValue(exportIndex, exp, found, next);
+          found.value = next;
+          if (!patched) {
+            exp.__raw = null; // 结构重建优先于字节补丁，避免两套数据打架
+            markChain(chain);
+            this.#touch(exportIndex, exp);
+          }
+          return { path, before, after: preview(next), type: found.type, mode: patched ? 'patch' : 'rebuild' };
+        }
+        node = found.value;
+      } else {
+        if (!Array.isArray(node)) throw new Error(`[${t.value}] 用于非数组节点`);
+        if (t.type === 'index' && (t.value < 0 || t.value >= node.length)) throw new Error(`索引越界: ${t.value} (长度 ${node.length})`);
+        if (isLast) {
+          const before = node[t.value];
+          node[t.value] = value;
+          if (ownerIsStructList(node)) ensureNamesDeep(node[t.value], (n) => this.ensureName(n));
+          markChain(chain);
+          this.#touch(exportIndex, exp);
+          return { path, before: preview(before), after: preview(value), type: typeof value };
+        }
+        node = node[t.value];
+      }
+    }
+    throw new Error('路径解析失败');
+  }
+
+  /**
+   * 值大小不变时直接在原始字节上打补丁（不做结构重建）。
+   * 这是默认路径：数值/布尔/枚举/定长字符串插槽的编辑都是字节级精确的。
+   * @returns {boolean} 是否成功就地打补丁
+   */
+  #tryPatchValue(exportIndex, exp, prop, nextValue) {
+    if (!prop || typeof prop.__payloadOffset !== 'number') return false;
+    if (exp.__raw === null && exp.isModified) return false; // 已走结构重建，补丁会与新布局冲突
+    const relStart = exp.serialOffset - this.header.totalHeaderSize;
+    if (relStart < 0) return false;
+    const src = this.uexp || this.uasset;
+    const base = exp.__raw || src.subarray(relStart, relStart + exp.serialSize);
+    // reader 记录的偏移是「虚拟绝对偏移」（uexp 视图中以 totalHeaderSize 起算），转成导内相对偏移
+    const local = (abs) => abs - exp.serialOffset;
+    try {
+      if (prop.type === 'BoolProperty') {
+        if (typeof prop.__boolOffset !== 'number') return false;
+        const copy = new Uint8Array(base);
+        copy[local(prop.__boolOffset)] = nextValue ? 1 : 0;
+        exp.__raw = copy;
+        exp.isModified = true;
+        this.modifiedExports.add(exportIndex);
+        return true;
+      }
+      const probe = { ...prop, value: nextValue, __payloadOffset: undefined };
+      const bytes = serializePayload(probe, this.names);
+      if (bytes.length !== prop.size) return false; // 变长（字符串/数组）→ 走结构重建
+      const copy = new Uint8Array(base);
+      copy.set(bytes, local(prop.__payloadOffset));
+      exp.__raw = copy;
+      exp.isModified = true;
+      this.modifiedExports.add(exportIndex);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  #markProp(prop) {
+    prop.isModified = true;
+  }
+
+  #touch(exportIndex, exp) {
+    exp.isModified = true;
+    this.modifiedExports.add(exportIndex);
+  }
+
+  // ---------------------------------------------------------------- 结构编辑
+  /** 在导出（或结构体路径）里新增属性 */
+  addProperty(exportRef, def) {
+    const exportIndex = this.resolveExport(exportRef);
+    const exp = this.exports[exportIndex];
+    const list = this.parseExport(exportIndex);
+    if (!def || !def.name || !def.type) throw new Error('新增属性需要 name 与 type');
+    if (list.some((p) => p.name === def.name && (p.arrayIndex || 0) === (def.arrayIndex || 0))) {
+      throw new Error(`属性已存在: ${def.name}`);
+    }
+    const prop = {
+      name: def.name,
+      type: def.type,
+      size: 0,
+      arrayIndex: def.arrayIndex || 0,
+      value: coerceValue({ type: def.type, ...def }, def.value, (n) => this.ensureName(n)),
+      structName: def.structName,
+      innerType: def.innerType,
+      valueType: def.valueType,
+      enumName: def.enumName,
+      isExpandable: !!def.isExpandable,
+      isModified: true,
+    };
+    ensureNamesDeep(prop, (n) => this.ensureName(n));
+    list.push(prop);
+    this.#touch(exportIndex, exp);
+    return { exportIndex, added: prop.name, type: prop.type };
+  }
+
+  /** 删除属性（支持 `Export.Prop`、`Export.Array[0]`） */
+  removeProperty(path) {
+    const { exportIndex, tokens } = this.parsePath(path);
+    if (!tokens.length) throw new Error('需要属性路径');
+    const exp = this.exports[exportIndex];
+    let node = this.parseExport(exportIndex);
+    for (let i = 0; i < tokens.length; i++) {
+      const t = tokens[i];
+      const isLast = i === tokens.length - 1;
+      if (t.type === 'prop') {
+        if (!Array.isArray(node)) throw new Error('节点不是属性列表');
+        const pos = node.findIndex((p) => p && p.name === t.value);
+        if (pos < 0) throw new Error(`属性不存在: ${t.value}`);
+        if (isLast) {
+          const [removed] = node.splice(pos, 1);
+          this.#touch(exportIndex, exp);
+          return { exportIndex, removed: removed.name };
+        }
+        node = node[pos].value;
+      } else {
+        if (!Array.isArray(node)) throw new Error('非数组节点');
+        if (isLast) {
+          const [removed] = node.splice(t.value, 1);
+          this.#touch(exportIndex, exp);
+          return { exportIndex, removedIndex: t.value, removed };
+        }
+        node = node[t.value];
+      }
+    }
+    throw new Error('路径解析失败');
+  }
+
+  /** 名称表：登记（不存在则追加） */
+  ensureName(name) {
+    if (typeof name !== 'string' || !name) return -1;
+    const idx = this.names.indexOf(name);
+    if (idx >= 0) return idx;
+    this.names.push(name);
+    this.namesDirty = true;
+    return this.names.length - 1;
+  }
+
+  renameName(index, newName) {
+    if (index < 0 || index >= this.names.length) throw new Error(`名称索引越界: ${index}`);
+    const before = this.names[index];
+    this.names[index] = newName;
+    this.namesDirty = true;
+    return { index, before, after: newName };
+  }
+
+  nameList({ query = '', offset = 0, limit = 200 } = {}) {
+    const q = query.toLowerCase();
+    const rows = this.names
+      .map((n, i) => ({ index: i, name: n, referenced: n }))
+      .filter((r) => !q || r.name.toLowerCase().includes(q));
+    return { total: rows.length, offset, limit, items: rows.slice(offset, offset + limit) };
+  }
+
+  // ---------------------------------------------------------------- 搜索
+  search(query, { regex = false, scope = 'all', limit = 100, caseSensitive = false } = {}) {
+    let match;
+    if (regex) {
+      const re = new RegExp(query, caseSensitive ? '' : 'i');
+      match = (s) => re.test(s);
+    } else if (caseSensitive) {
+      match = (s) => s.includes(query);
+    } else {
+      const q = query.toLowerCase();
+      match = (s) => s.toLowerCase().includes(q);
+    }
+
+    const hits = [];
+    if (scope === 'all' || scope === 'names') {
+      this.names.forEach((n, i) => {
+        if (match(n)) hits.push({ scope: 'name', index: i, value: n });
+      });
+    }
+    if (scope === 'all' || scope === 'values' || scope === 'properties') {
+      for (let i = 0; i < this.exports.length; i++) {
+        let props;
+        try { props = this.parseExport(i); } catch { continue; }
+        walkProps(props, [], (prop, pathArr) => {
+          if (scope !== 'names' && match(String(prop.name))) {
+            hits.push({ scope: 'property', exportIndex: i, exportName: this.exports[i].objectName, path: pathArr.join('.'), type: prop.type, value: preview(prop.value) });
+          }
+          if (['StrProperty', 'NameProperty', 'TextProperty', 'EnumProperty', 'ObjectProperty', 'SoftObjectProperty'].includes(prop.type)) {
+            const s = prop.type === 'TextProperty' ? prop.value && prop.value.sourceString : prop.type === 'SoftObjectProperty' ? prop.value && prop.value.assetPathName : prop.value;
+            if (typeof s === 'string' && match(s)) {
+              hits.push({ scope: 'value', exportIndex: i, exportName: this.exports[i].objectName, path: pathArr.join('.'), type: prop.type, value: s });
+            }
+          }
+        });
+        if (hits.length >= limit) break;
+      }
+    }
+    return { total: hits.length, truncated: hits.length >= limit, items: hits.slice(0, limit) };
+  }
+
+  // ---------------------------------------------------------------- 原始字节
+  /** 读取导出序列化区间的十六进制 */
+  hexDump(exportRef, { offset = 0, length = 256 } = {}) {
+    const idx = this.resolveExport(exportRef);
+    const exp = this.exports[idx];
+    const src = this.uexp || this.uasset;
+    const start = exp.serialOffset - this.header.totalHeaderSize + offset;
+    const bytes = src.subarray(Math.max(0, start), Math.min(src.length, start + length));
+    return { exportIndex: idx, absoluteOffset: exp.serialOffset + offset, bytes: Array.from(bytes), hex: toHex(bytes) };
+  }
+
+  /** 直接改导出内的原始字节（用于引擎不认识的类型 / 手工微调） */
+  patchBytes(exportRef, offset, bytes) {
+    const idx = this.resolveExport(exportRef);
+    const exp = this.exports[idx];
+    const src = this.uexp || this.uasset;
+    const rel = exp.serialOffset - this.header.totalHeaderSize;
+    const base = exp.__raw || src.subarray(rel, rel + exp.serialSize);
+    const copy = new Uint8Array(base);
+    const patch = typeof bytes === 'string' ? fromHex(bytes) : asU8(bytes);
+    if (offset < 0 || offset + patch.length > copy.length) {
+      throw new Error(`补丁越界: offset=${offset} len=${patch.length} 区间=0..${copy.length}`);
+    }
+    copy.set(patch, offset);
+    exp.__raw = copy;
+    exp.isModified = true;
+    this.modifiedExports.add(idx);
+    return { exportIndex: idx, offset, length: patch.length, hex: toHex(patch) };
+  }
+
+  // ---------------------------------------------------------------- 保存
+  /**
+   * 序列化。
+   * @param {{rebuildAll?:boolean, verify?:boolean}} opts
+   */
+  save({ rebuildAll = false, verify = true, force = false } = {}) {
+    if (this.modifiedExports.size === 0 && !this.namesDirty) {
+      return {
+        uasset: this.uasset,
+        uexp: this.uexp,
+        unchanged: true,
+        report: null,
+        verification: { ok: true, problems: [] },
+      };
+    }
+    // 写入前把所有会被引用的名称登记好（避免静默写成 "None"）
+    for (const idx of this.modifiedExports) {
+      const exp = this.exports[idx];
+      if (exp.properties) ensureNamesDeep(exp.properties, (n) => this.ensureName(n));
+    }
+    // 重建前修正结构体数组的内层 header size（元素边界必须自洽，否则 UE 读不了）
+    for (const idx of this.modifiedExports) {
+      const exp = this.exports[idx];
+      if (exp.properties) patchStructArraySizes(exp.properties, this.names);
+    }
+    if (!force) {
+      for (const idx of this.modifiedExports) {
+        const exp = this.exports[idx];
+        if (exp.properties && !exp.__raw) {
+          const bad = findRawFallback(exp.properties, exp.objectName);
+          if (bad) {
+            throw new Error(
+              `拒绝重建导出 #${idx} (${exp.objectName})：${bad}。\n` +
+              `这类结构在解析时退化为原始字节块，重建会改变字节布局。\n` +
+              `改用定长编辑（数值/布尔/枚举，会自动走字节补丁），或显式传入 force=true 强制重建。`
+            );
+          }
+        }
+      }
+    }
+
+    const out = serializePackage(
+      {
+        uasset: this.uasset,
+        uexp: this.uexp,
+        header: this.header,
+        names: this.names,
+        originalNames: this.originalNames,
+        imports: this.imports,
+        exports: this.exports,
+      },
+      { rebuildAll }
+    );
+
+    const verification = verify ? verifySaved({ modifiedExports: [...this.modifiedExports] }, out, { deep: true }) : { ok: true, problems: [] };
+    return { ...out, unchanged: false, report: out.report, verification };
+  }
+
+  /**
+   * 保存到磁盘（默认写入 `.mod.uasset` / `.mod.uexp`，绝不覆盖源文件，除非 overwrite=true）
+   */
+  async saveToFile(uassetPath, { uexpPath, overwrite = false, suffix = '.mod', verify = true, force = false } = {}) {
+    const fs = await import('node:fs/promises');
+    const out = this.save({ verify, force });
+    const outAsset = overwrite ? uassetPath : uassetPath.replace(/\.uasset$/i, `${suffix}.uasset`);
+    await fs.writeFile(outAsset, Buffer.from(out.uasset));
+    let outUexp = null;
+    if (out.uexp) {
+      const guessed = uexpPath || uassetPath.replace(/\.uasset$/i, '.uexp');
+      outUexp = overwrite ? guessed : guessed.replace(/\.uexp$/i, `${suffix}.uexp`);
+      await fs.writeFile(outUexp, Buffer.from(out.uexp));
+    }
+    return { uassetPath: outAsset, uexpPath: outUexp, verification: out.verification, report: out.report };
+  }
+
+  /**
+   * 打一个「编辑状态」快照。
+   *
+   * 注意：set() 改的是解析树，不是 this.uasset 缓冲区 —— 所以快照必须深拷贝解析树，
+   * 用缓冲区做快照会把快照之前的所有修改一起丢掉。
+   */
+  snapshotState() {
+    return {
+      exports: deepClone(this.exports),
+      names: [...this.names],
+      modified: [...this.modifiedExports],
+      namesDirty: this.namesDirty,
+    };
+  }
+
+  /** 恢复到 snapshotState() 的结果 */
+  restoreState(snap) {
+    if (!snap) throw new Error('快照为空');
+    this.exports = deepClone(snap.exports);
+    this.names = [...snap.names];
+    this.modifiedExports = new Set(snap.modified);
+    this.namesDirty = snap.namesDirty;
+    return this;
+  }
+
+  /** 用上次 save 的结果刷新内存状态（继续编辑时用） */
+  adopt({ uasset, uexp }) {
+    this.#loadBuffers(uasset, uexp);
+    this.modifiedExports.clear();
+    this.namesDirty = false;
+    return this;
+  }
+
+  /** 回滚到打开时的状态 */
+  rollback() {
+    this.#loadBuffers(this.original.uasset, this.original.uexp);
+    this.modifiedExports.clear();
+    this.namesDirty = false;
+    this.notes = [];
+    return this;
+  }
+
+  // ---------------------------------------------------------------- 输出
+  toJSON({ exportRef = null, depth = 12 } = {}) {
+    if (exportRef !== null) {
+      const idx = this.resolveExport(exportRef);
+      return {
+        exportIndex: idx,
+        exportName: this.exports[idx].objectName,
+        className: this.#classNameOf(this.exports[idx]),
+        properties: toPlain(this.parseExport(idx), depth),
+      };
+    }
+    return {
+      info: this.info(),
+      exports: this.exports.map((e, i) => {
+        let props = null;
+        try { props = toPlain(this.parseExport(i), depth); } catch (e) { props = { error: String(e.message || e) }; }
+        return { index: i, name: e.objectName, className: this.#classNameOf(e), serialOffset: e.serialOffset, serialSize: e.serialSize, properties: props };
+      }),
+    };
+  }
+
+  /** 面向 AI 的紧凑树：按需展开，控制 token */
+  tree({ exportRef = null, depth = 3, maxItems = 40 } = {}) {
+    const idx = exportRef === null ? 0 : this.resolveExport(exportRef);
+    const exp = this.exports[idx];
+    const props = this.parseExport(idx);
+    return {
+      exportIndex: idx,
+      exportName: exp.objectName,
+      className: this.#classNameOf(exp),
+      serialSize: exp.serialSize,
+      properties: props.slice(0, maxItems).map((p) => treeProp(p, depth)),
+      total: props.length,
+      truncated: props.length > maxItems,
+    };
+  }
+
+  diff(other) {
+    const a = this.parseAll().toJSON();
+    const b = other.parseAll().toJSON();
+    return diffJSON(a, b);
+  }
+}
+
+// -------------------------------------------------------------------- 工具
+/**
+ * 修正「结构体数组」的内层 header size。
+ * UE 的 array-of-struct 在元素前有一个内层 FPropertyTag（name/type/size/index/structName/guid/hasGuid），
+ * 其中的 size 必须等于所有元素序列化后的总字节数，否则后续元素边界会错位。
+ */
+/** 深拷贝解析树：保留 Uint8Array、保留属性数组上的 _rawBytes 等附加键 */
+function deepClone(v) {
+  if (v === null || typeof v !== 'object') return v;
+  if (v instanceof Uint8Array) return v.slice();
+  if (Array.isArray(v)) {
+    const out = v.map(deepClone);
+    for (const k of Object.keys(v)) {
+      if (/^\d+$/.test(k)) continue;
+      out[k] = deepClone(v[k]);
+    }
+    return out;
+  }
+  const out = {};
+  for (const k of Object.keys(v)) out[k] = deepClone(v[k]);
+  return out;
+}
+
+function patchStructArraySizes(props, names) {
+  for (const p of props || []) {
+    if (!p || typeof p !== 'object') continue;
+
+    if (p.type === 'ArrayProperty' && p.innerType === 'StructProperty'
+        && p.arrayStructInfo && Array.isArray(p.value)
+        && !p.arrayStructInfo.isNativePhysicsArray) {
+      const info = p.arrayStructInfo;
+      // 只有「需要重算」的数组才动 header：被改动、或含未解析的原始块
+      let total = 0;
+      let exact = true;
+      for (const item of p.value) {
+        if (item instanceof Uint8Array) {
+          total += item.length;               // 原始块：长度已知，原样搬运
+        } else if (Array.isArray(item)) {
+          if (item.length === 1 && item[0] && item[0].type === 'ByteProperty' && item[0].value instanceof Uint8Array) {
+            total += item[0].value.length;
+          } else {
+            try {
+              total += measureProps(item, names);
+            } catch {
+              exact = false;
+            }
+          }
+        } else if (item && typeof item === 'object') {
+          total += structPrimitiveSize(info.structName);
+        }
+      }
+      // 写回前把 header 总长改成实际写出的字节数；UE 用这个字段界定数组边界
+      if (exact && total > 0) info.originalHeaderSize = total;
+      if (exact) info.size = p.value.length > 0 ? Math.floor(total / p.value.length) : info.size;
+    }
+
+    if (p.type === 'StructProperty' && Array.isArray(p.value)) patchStructArraySizes(p.value, names);
+    if (p.type === 'ArrayProperty' && Array.isArray(p.value)) {
+      for (const el of p.value) if (Array.isArray(el) && el[0] && el[0].name) patchStructArraySizes(el, names);
+    }
+  }
+}
+
+function measureProps(props, names) {
+  const w = new UAssetBinaryWriter(1 << 16);
+  const pw = new UAssetPropertyWriter(w, names, false);
+  pw.writeProperties(props);
+  return w.getBuffer().length;
+}
+
+function structPrimitiveSize(structName) {
+  switch (structName) {
+    case 'Vector': case 'Rotator': return 12;
+    case 'Vector2D': return 8;
+    case 'Quat': case 'Vector4': case 'LinearColor': case 'Plane': return 16;
+    case 'Color': return 4;
+    case 'IntPoint': return 8;
+    case 'Box': return 25;
+    case 'Box2D': return 17;
+    case 'Transform': return 40;
+    case 'Guid': return 16;
+    default: return 0;
+  }
+}
+
+/** 把一条属性链上的所有节点标记为已修改（struct 的 _rawBytes 快路径依赖 isModified） */
+function markChain(chain) {
+  for (const p of chain) {
+    if (!p || typeof p !== 'object') continue;
+    p.isModified = true;
+    if (Array.isArray(p.value)) {
+      for (const el of p.value) {
+        if (Array.isArray(el)) {
+          for (const c of el) if (c && typeof c === 'object') c.isModified = true;
+        } else if (el && typeof el === 'object' && el.name) {
+          el.isModified = true;
+        }
+      }
+    }
+  }
+}
+
+function ownerIsStructList(node) {
+  return Array.isArray(node) && node.length > 0 && Array.isArray(node[0]) && node[0][0] && node[0][0].name;
+}
+
+function summarizeProps(props) {
+  const out = {};
+  for (const p of props) out[p.name] = preview(p.value);
+  return out;
+}
+
+function treeProp(p, depth) {
+  const base = { name: p.name, type: p.type, size: p.size, arrayIndex: p.arrayIndex || 0 };
+  if (p.structName) base.structName = p.structName;
+  if (p.innerType) base.innerType = p.innerType;
+  if (p.enumName) base.enumName = p.enumName;
+  if (depth <= 0) { base.value = preview(p.value); return base; }
+  if (p.type === 'StructProperty' && Array.isArray(p.value)) {
+    base.children = p.value.slice(0, 40).map((c) => treeProp(c, depth - 1));
+    if (p.value.length > 40) base.childrenTruncated = p.value.length - 40;
+    return base;
+  }
+  if (p.type === 'ArrayProperty' && Array.isArray(p.value)) {
+    base.count = p.value.length;
+    base.items = p.value.slice(0, 10).map((item) =>
+      Array.isArray(item) && item[0] && item[0].name
+        ? { children: item.slice(0, 40).map((c) => treeProp(c, depth - 1)) }
+        : preview(item)
+    );
+    if (p.value.length > 10) base.itemsTruncated = p.value.length - 10;
+    return base;
+  }
+  base.value = preview(p.value);
+  return base;
+}
+
+/** 归一化赋值：按属性类型转换 */
+function coerceValue(prop, value, ensureName) {
+  const t = prop.type;
+  switch (t) {
+    case 'BoolProperty':
+      return typeof value === 'string' ? value.toLowerCase() === 'true' || value === '1' : !!value;
+    case 'Int8Property': case 'Int16Property': case 'IntProperty': case 'Int64Property':
+    case 'UInt16Property': case 'UInt32Property': case 'UInt64Property':
+    case 'FloatProperty':
+      // 写回时按 float32 落盘，内存里也归一化成 float32，
+      // 否则「改 0.45 → 读回 0.449999988」会让调用方以为写入失败。
+      return Math.fround(typeof value === 'number' ? value : Number(value));
+    case 'DoubleProperty':
+      return typeof value === 'number' ? value : Number(value);
+    case 'Int8Property_': case 'Int16Property_': case 'IntProperty_': case 'Int64Property_':
+      return Math.trunc(typeof value === 'number' ? value : Number(value));
+    case 'UInt16Property_': case 'UInt32Property_': case 'UInt64Property_':
+      return Math.trunc(typeof value === 'number' ? value : Number(value)) >>> 0;
+    case 'StrProperty': case 'AnsiStrProperty': case 'Utf8StrProperty':
+      return String(value);
+    case 'NameProperty':
+      if (ensureName) ensureName(String(value));
+      return String(value);
+    case 'EnumProperty':
+      if (ensureName) ensureName(String(value));
+      return typeof value === 'object' ? value : String(value);
+    case 'ByteProperty':
+      if (typeof value === 'string' && !/^-?\d+$/.test(value)) {
+        if (ensureName) ensureName(value);
+        return value;
+      }
+      return Number(value);
+    case 'ObjectProperty': case 'ClassProperty': case 'InterfaceProperty':
+    case 'WeakObjectProperty': case 'LazyObjectProperty': case 'AssetObjectProperty': case 'AssetClassProperty':
+      if (ensureName) ensureName(String(value));
+      return String(value);
+    case 'SoftObjectProperty': case 'SoftClassProperty':
+      if (typeof value === 'object' && value) return value;
+      if (ensureName) ensureName(String(value));
+      return { assetPathName: String(value), subPathString: prop.value && prop.value.subPathString ? prop.value.subPathString : '' };
+    case 'TextProperty': {
+      const prev = prop.value && typeof prop.value === 'object' ? prop.value : { flags: 0, historyType: 0, namespace: '', key: '' };
+      if (typeof value === 'object' && value) return { ...prev, ...value };
+      return { ...prev, sourceString: String(value) };
+    }
+    case 'StructProperty':
+      if (Array.isArray(value)) return value;
+      if (typeof value === 'object' && value) {
+        const children = Array.isArray(prop.value) ? prop.value : [];
+        return children.map((c) => (value[c.name] !== undefined ? { ...c, value: coerceValue(c, value[c.name], ensureName), isModified: true } : c));
+      }
+      return value;
+    case 'ArrayProperty':
+      return Array.isArray(value) ? value : [value];
+    default:
+      return value;
+  }
+}
+
+/** 递归登记一个属性树里所有会被写成 FName 的字符串 */
+function ensureNamesDeep(node, ensureName) {
+  if (Array.isArray(node)) {
+    for (const item of node) ensureNamesDeep(item, ensureName);
+    return;
+  }
+  if (!node || typeof node !== 'object') return;
+  if (typeof node.name === 'string' && typeof node.type === 'string') {
+    ensureName(node.name);
+    ensureName(node.type);
+    if (node.structName) ensureName(node.structName);
+    if (node.innerType) ensureName(node.innerType);
+    if (node.valueType) ensureName(node.valueType);
+    if (node.enumName) ensureName(node.enumName);
+    const t = node.type;
+    const v = node.value;
+    if ((t === 'EnumProperty' || t === 'ByteProperty' || t === 'ObjectProperty' || t === 'ClassProperty' ||
+         t === 'InterfaceProperty' || t === 'WeakObjectProperty' || t === 'LazyObjectProperty' ||
+         t === 'AssetObjectProperty' || t === 'AssetClassProperty') && typeof v === 'string') {
+      ensureName(v);
+    }
+    if ((t === 'SoftObjectProperty' || t === 'SoftClassProperty') && v && typeof v === 'object' && v.assetPathName) {
+      ensureName(v.assetPathName);
+    }
+    if (t === 'DelegateProperty' && v && v.functionName) ensureName(v.functionName);
+    if (t === 'MulticastDelegateProperty' && Array.isArray(v)) v.forEach((d) => d && d.functionName && ensureName(d.functionName));
+    if (v && typeof v === 'object') ensureNamesDeep(v, ensureName);
+    return;
+  }
+  for (const k of Object.keys(node)) ensureNamesDeep(node[k], ensureName);
+}
+
+function preview(v, depth = 0) {
+  if (v === null || v === undefined) return v ?? null;
+  if (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string') return v;
+  if (v instanceof Uint8Array) return `<${v.length} bytes>`;
+  if (Array.isArray(v)) {
+    if (v.length && v[0] && v[0].name && v[0].type) {
+      const o = {};
+      for (const p of v) o[p.name] = preview(p.value, depth + 1);
+      return o;
+    }
+    return v.slice(0, 8).map((x) => preview(x, depth + 1)).concat(v.length > 8 ? [`...+${v.length - 8}`] : []);
+  }
+  if (typeof v === 'object') {
+    const o = {};
+    for (const k of Object.keys(v).slice(0, 12)) o[k] = preview(v[k], depth + 1);
+    return o;
+  }
+  return String(v);
+}
+
+function walkProps(props, pathArr, cb) {
+  if (!Array.isArray(props)) return;
+  for (const p of props || []) {
+    if (!p || typeof p !== 'object') continue;
+    cb(p, [...pathArr, p.name]);
+    if (Array.isArray(p.value)) {
+      if (p.value.length && p.value[0] && p.value[0].name && p.value[0].type) {
+        walkProps(p.value, [...pathArr, p.name], cb);
+      } else if (p.value.length && Array.isArray(p.value[0])) {
+        p.value.forEach((el, i) => walkProps(el, [...pathArr, `${p.name}[${i}]`], cb));
+      }
+    }
+  }
+}
+
+function toPlain(node, depth) {
+  if (depth < 0) return '<deep>';
+  if (node instanceof Uint8Array) return `<${node.length} bytes: ${toHex(node.subarray(0, 32))}${node.length > 32 ? '...' : ''}>`;
+  if (Array.isArray(node)) return node.map((x) => toPlain(x, depth - 1));
+  if (node && typeof node === 'object') {
+    const o = {};
+    for (const k of Object.keys(node)) {
+      if (k === 'originalBytes' || k === '__raw' || k === 'paddingData') continue;
+      o[k] = toPlain(node[k], depth - 1);
+    }
+    return o;
+  }
+  return node;
+}
+
+function toHex(u8) {
+  return Array.from(u8).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function fromHex(hex) {
+  const clean = String(hex).replace(/[^0-9a-fA-F]/g, '');
+  if (clean.length % 2) throw new Error('十六进制长度必须是偶数');
+  const out = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
+
+function diffJSON(a, b, path = '', out = []) {
+  const isObj = (x) => x && typeof x === 'object';
+  if (Array.isArray(a) && Array.isArray(b)) {
+    const n = Math.max(a.length, b.length);
+    for (let i = 0; i < n; i++) {
+      if (i >= a.length) out.push({ path: `${path}[${i}]`, kind: 'added', after: b[i] });
+      else if (i >= b.length) out.push({ path: `${path}[${i}]`, kind: 'removed', before: a[i] });
+      else diffJSON(a[i], b[i], `${path}[${i}]`, out);
+    }
+    return out;
+  }
+  if (isObj(a) && isObj(b)) {
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    for (const k of keys) {
+      if (!(k in a)) out.push({ path: path ? `${path}.${k}` : k, kind: 'added', after: b[k] });
+      else if (!(k in b)) out.push({ path: path ? `${path}.${k}` : k, kind: 'removed', before: a[k] });
+      else diffJSON(a[k], b[k], path ? `${path}.${k}` : k, out);
+    }
+    return out;
+  }
+  if (a !== b) out.push({ path, kind: 'changed', before: a, after: b });
+  return out;
+}
+
+/**
+ * 找出「解析时退化成原始字节块、且又被改动链波及」的结构体。
+ *
+ * 判据：节点自身没有 isModified 时，写入器会直接吐出它的 _rawBytes（原字节），
+ * 这类节点重建是安全的；只有落在改动链上、又被降级成原始块的节点才会破坏布局。
+ *
+ * @returns {string|null} 第一个命中的路径，未命中返回 null
+ */
+function findRawFallback(props, exportName = '') {
+  const stack = [{ props, path: exportName }];
+  while (stack.length) {
+    const { props: list, path } = stack.pop();
+    if (!Array.isArray(list)) continue;
+    if (list._rawBytes && list.length === 0 && list.isModified) return `${path} 的属性表退化为原始字节块且被改动`;
+    for (const p of list) {
+      if (!p || typeof p !== 'object') continue;
+      const here = path ? `${path}.${p.name}` : p.name;
+      const isComplex = p.type === 'StructProperty' || p.type === 'ArrayProperty'
+        || p.type === 'SetProperty' || p.type === 'MapProperty';
+      if (isComplex && p.isModified) {
+        if (p.value instanceof Uint8Array) return `${here} 结构体解析失败（${p.value.length} 字节原始块）且被改动`;
+        if (Array.isArray(p.value) && p.value._rawBytes && p.value.length === 0) {
+          return `${here} 结构体解析失败（${p.value._rawBytes.length} 字节原始块）且被改动`;
+        }
+        // 数组元素级别：被改动数组里若有元素本身是原始块，也要拒绝
+        if (Array.isArray(p.value)) {
+          for (let i = 0; i < p.value.length; i++) {
+            const el = p.value[i];
+            if (el instanceof Uint8Array) return `${here}[${i}] 元素为原始字节块且所在数组被改动`;
+            if (Array.isArray(el) && el._rawBytes && el.length === 0) {
+              return `${here}[${i}] 元素结构体解析失败（${el._rawBytes.length} 字节）且所在数组被改动`;
+            }
+          }
+        }
+      }
+      if (Array.isArray(p.value)) {
+        for (let i = p.value.length - 1; i >= 0; i--) {
+          const el = p.value[i];
+          if (Array.isArray(el)) stack.push({ props: el, path: `${here}[${i}]` });
+        }
+      }
+    }
+  }
+  return null;
+}
+
+
+/* ==================== 模块化 core → 全局符号 ==================== */
 globalThis.isDebugEnabled = isDebugEnabled;
 globalThis.debugLog = debugLog;
 globalThis.debugWarn = debugWarn;
@@ -4109,6 +5681,10 @@ globalThis.UAssetPropertyReader = UAssetPropertyReader;
 globalThis.UAssetBinaryWriter = UAssetBinaryWriter;
 globalThis.UAssetHeaderWriter = UAssetHeaderWriter;
 globalThis.UAssetPropertyWriter = UAssetPropertyWriter;
+globalThis.Package = Package;
+
+
+/* ==================== ui (src/web/ui.js) ==================== */
 
 /* eslint-disable */
 /**
@@ -6171,6 +7747,14 @@ async function processFiles(files) {
             objectReader.setOffset(globalHeader.exportOffset);
             globalExports = objectReader.readExports(globalHeader.exportCount);
         }
+
+        // 登记到 App 内 MCP，AI 可以直接操作这份资产
+        try {
+            if (window.__APP_MCP && window.__APP_MCP.register) {
+                const sid = window.__APP_MCP.register(uassetFile.name, globalUAssetBuffer, globalUExpBuffer);
+                if (sid) debugLog(`[MCP] 资产已登记为 ${sid}`);
+            }
+        } catch (e) { console.warn('[MCP] 登记失败', e); }
 
         // Add Name Map node at the top (before exports)
         const nameMapLi = document.createElement("li");
@@ -8953,5 +10537,906 @@ function dfStructLabeled(prop) {
     return "";
 }
 
+
+
+/* ==================== mcp-app (src/web/mcp-app.js) ==================== */
+
+/* eslint-disable */
+/**
+ * mcp-app.js — App 内 MCP：让 AI 直接操作「手机上正在编辑的资产」。
+ *
+ * 为什么在 WebView 里实现协议、由 Java 只做 HTTP 转发：
+ *   解析/回写逻辑本来就在这个 JS 引擎里，重写一遍 Java 版必然与 CLI 行为分叉。
+ *   所以 Java 只负责收发字节，JSON-RPC 与 26 个工具全部在这里，和 Node 侧共用 Package。
+ *
+ * 与 Node 版 MCP 的差别：文件访问走 SAF（content:// URI），没有目录概念，
+ * 所以 scan_dir / pak 这些基于路径的工具不在这里，改用 app_* 系列。
+ */
+(function () {
+    'use strict';
+
+    var assets = new Map();     // id -> { id, name, pkg, uasset, uexp, openedAt }
+    var seq = 0;
+    var MAX_ASSETS = 8;
+
+    function nextId() { return 'a' + (++seq); }
+
+    function getAsset(id) {
+        var a = assets.get(id);
+        if (!a) {
+            var ids = Array.from(assets.keys());
+            throw new Error('资产不存在: ' + id +
+                (ids.length ? '（已载入: ' + ids.join(', ') + '）' : '（还没有载入任何资产，先用 app_open_file 或 uasset_open_uri）'));
+        }
+        return a;
+    }
+
+    /* ------------------------------------------------------------ 小工具 */
+
+    function preview(v, depth) {
+        depth = depth || 0;
+        if (v === null || v === undefined) return null;
+        if (v instanceof Uint8Array) return '<' + v.length + ' bytes>';
+        if (typeof v !== 'object') return v;
+        if (Array.isArray(v)) {
+            if (!v.length) return [];
+            if (depth >= 2) return '[' + v.length + ' items]';
+            return v.slice(0, 20).map(function (x) { return preview(x, depth + 1); });
+        }
+        if (v.assetPathName !== undefined) return { assetPathName: v.assetPathName, subPathString: v.subPathString };
+        var out = {};
+        Object.keys(v).slice(0, 20).forEach(function (k) {
+            if (k.indexOf('__') === 0 || k === '_rawBytes') return;
+            out[k] = preview(v[k], depth + 1);
+        });
+        return out;
+    }
+
+    function countRaw(props) {
+        var n = 0;
+        (function walk(list) {
+            if (!Array.isArray(list)) return;
+            if (list._rawBytes && list.length === 0) n++;
+            list.forEach(function (p) {
+                if (!p || typeof p !== 'object') return;
+                if (p.value instanceof Uint8Array && (p.type === 'StructProperty' || p.type === 'ArrayProperty')) n++;
+                else if (Array.isArray(p.value) && p.value._rawBytes && p.value.length === 0) n++;
+                if (Array.isArray(p.value)) p.value.forEach(function (el) { if (Array.isArray(el)) walk(el); });
+            });
+        })(props);
+        return n;
+    }
+
+    function b64ToBytes(b64) {
+        var bin = atob(b64);
+        var out = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+        return out;
+    }
+
+    function bytesToB64(bytes) {
+        var CH = 0x8000, out = '';
+        for (var i = 0; i < bytes.length; i += CH) {
+            out += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+        }
+        return btoa(out);
+    }
+
+    function bridge() {
+        if (typeof AndroidFS === 'undefined' || !AndroidFS) {
+            throw new Error('这个环境没有 AndroidFS 桥（只能在 App 内使用文件相关工具）');
+        }
+        return AndroidFS;
+    }
+
+    function readJson(s) {
+        try { return JSON.parse(s); } catch (e) { return null; }
+    }
+
+    /* ------------------------------------------------------------ 资产登记 */
+
+    function register(name, uasset, uexp) {
+        // 同一份资产重复登记时复用，避免 AI 每轮都开新的
+        for (var entry of assets) {
+            var a = entry[1];
+            if (a.name === name && a.uasset.length === uasset.length) return a.id;
+        }
+        if (assets.size >= MAX_ASSETS) assets.delete(assets.keys().next().value);
+        var id = nextId();
+        var pkg = new Package({ uasset: uasset, uexp: uexp || null, name: name || 'asset' });
+        assets.set(id, { id: id, name: name || 'asset', pkg: pkg, uasset: uasset, uexp: uexp || null, openedAt: Date.now() });
+        return id;
+    }
+
+    function openFromUri(uri, uexpUri) {
+        var fs = bridge();
+        var r1 = readJson(fs.readBase64(uri));
+        if (!r1 || !r1.ok) throw new Error('读取失败: ' + (r1 && r1.error));
+        var uasset = b64ToBytes(r1.data);
+        var uexp = null;
+        if (uexpUri) {
+            var r2 = readJson(fs.readBase64(uexpUri));
+            if (!r2 || !r2.ok) throw new Error('读取 .uexp 失败: ' + (r2 && r2.error));
+            uexp = b64ToBytes(r2.data);
+        }
+        var name = fs.displayName(uri);
+        return register(name, uasset, uexp);
+    }
+
+    /* ------------------------------------------------------------ 工具实现 */
+
+    var T = {};
+
+    T.app_status = {
+        desc: 'App 内 MCP 的运行状态与已载入资产。第一次连上先调这个。',
+        schema: { type: 'object', properties: {} },
+        run: function () {
+            return {
+                running: true,
+                version: '2.0.0',
+                assets: Array.from(assets.values()).map(function (a) {
+                    return { session: a.id, name: a.name, exports: a.pkg.exports.length, names: a.pkg.names.length, split: a.pkg.isSplit };
+                }),
+                note: 'session 就是这里返回的 id；只能操作已载入的资产',
+            };
+        },
+    };
+
+    T.app_list_files = {
+        desc: '列出用户已授权给 AI 读取的文件（SAF 授权，重启后仍有效）。用返回的 session/uri 去 app_open_file。',
+        schema: { type: 'object', properties: {} },
+        run: function () {
+            var fs = bridge();
+            var list = readJson(fs.listAiFiles());
+            return list || { files: [], note: '读取授权列表失败' };
+        },
+    };
+
+    T.app_open_file = {
+        desc: '按 app_list_files 返回的 uri 载入资产（可同时给 uexpUri 配对）。返回 session。',
+        schema: {
+            type: 'object',
+            properties: {
+                uri: { type: 'string', description: '.uasset 的 content:// URI（或 app_list_files 里的 id）' },
+                uexpUri: { type: 'string', description: '可选，配套 .uexp 的 URI' },
+            },
+            required: ['uri'],
+        },
+        run: function (args) {
+            var fs = bridge();
+            var uri = args.uri;
+            // 允许直接传 app_list_files 里的 id
+            if (!/^content:|^file:/.test(uri)) {
+                var list = readJson(fs.listAiFiles()) || {};
+                var hit = (list.files || []).filter(function (f) { return f.id === uri || f.name === uri; })[0];
+                if (!hit) throw new Error('找不到该 id/名字对应的授权文件: ' + uri + '（先调 app_list_files 看有哪些）');
+                uri = hit.uri;
+                if (!args.uexpUri) {
+                    var pair = (list.files || []).filter(function (f) {
+                        return f.name === hit.name.replace(/\.uasset$/i, '.uexp');
+                    })[0];
+                    if (pair) args.uexpUri = pair.uri;
+                }
+            }
+            var id = openFromUri(uri, args.uexpUri);
+            var a = assets.get(id);
+            return { session: id, name: a.name, ...a.pkg.info() };
+        },
+    };
+
+    T.app_close = {
+        desc: '关闭会话，释放内存。',
+        schema: { type: 'object', properties: { session: { type: 'string' } }, required: ['session'] },
+        run: function (args) {
+            if (!assets.has(args.session)) throw new Error('会话不存在: ' + args.session);
+            assets.delete(args.session);
+            return { closed: args.session, remaining: Array.from(assets.keys()) };
+        },
+    };
+
+    T.uasset_info = {
+        desc: '资产概况：引擎版本、表大小、导出/导入数、是否有未保存改动。',
+        schema: { type: 'object', properties: { session: { type: 'string' } }, required: ['session'] },
+        run: function (a) { return getAsset(a.session).pkg.info(); },
+    };
+
+    T.uasset_list_exports = {
+        desc: '列导出（对象）。可按名字/类名过滤、分页。',
+        schema: {
+            type: 'object',
+            properties: { session: { type: 'string' }, filter: { type: 'string' }, offset: { type: 'number' }, limit: { type: 'number' } },
+            required: ['session'],
+        },
+        run: function (a) {
+            return getAsset(a.session).pkg.exportList({ filter: a.filter || '', offset: a.offset || 0, limit: a.limit || 100 });
+        },
+    };
+
+    T.uasset_list_names = {
+        desc: '列名称表条目（可按子串过滤、分页）。新增属性或改名时先查重。',
+        schema: {
+            type: 'object',
+            properties: { session: { type: 'string' }, query: { type: 'string' }, offset: { type: 'number' }, limit: { type: 'number' } },
+            required: ['session'],
+        },
+        run: function (a) {
+            return getAsset(a.session).pkg.nameList({ query: a.query || '', offset: a.offset || 0, limit: a.limit || 200 });
+        },
+    };
+
+    T.uasset_tree = {
+        desc: '看导出或属性的结构树（受 depth / maxItems 限制，避免一次塞太多）。',
+        schema: {
+            type: 'object',
+            properties: { session: { type: 'string' }, export: { description: '导出名或 #索引' }, depth: { type: 'number' }, maxItems: { type: 'number' } },
+            required: ['session'],
+        },
+        run: function (a) {
+            return getAsset(a.session).pkg.tree({ exportRef: a.export, depth: a.depth === undefined ? 3 : a.depth, maxItems: a.maxItems || 40 });
+        },
+    };
+
+    T.uasset_get = {
+        desc: '读一个路径的值，返回类型/大小/当前值。路径形如 Default__Xxx_C.Prop[0].Sub',
+        schema: { type: 'object', properties: { session: { type: 'string' }, path: { type: 'string' } }, required: ['session', 'path'] },
+        run: function (a) { return getAsset(a.session).pkg.get(a.path); },
+    };
+
+    T.uasset_set = {
+        desc: '改一个路径的值。内部自动判定「定长字节补丁」还是「重建导出」，返回值里的 mode 告诉你走了哪条。',
+        schema: {
+            type: 'object',
+            properties: { session: { type: 'string' }, path: { type: 'string' }, value: {} },
+            required: ['session', 'path', 'value'],
+        },
+        run: function (a) { return getAsset(a.session).pkg.set(a.path, a.value); },
+    };
+
+    T.uasset_set_many = {
+        desc: '一次改多个路径（同 uasset_set 的批量版）。',
+        schema: {
+            type: 'object',
+            properties: { session: { type: 'string' }, edits: { type: 'array', items: { type: 'object' } } },
+            required: ['session', 'edits'],
+        },
+        run: function (a) {
+            var pkg = getAsset(a.session).pkg;
+            return { results: (a.edits || []).map(function (e) {
+                try { return Object.assign({ path: e.path }, pkg.set(e.path, e.value)); }
+                catch (err) { return { path: e.path, error: String(err.message || err) }; }
+            }) };
+        },
+    };
+
+    T.uasset_query = {
+        desc: '按名字/类型/值正则在所有导出里筛属性，返回可读路径与当前值（只读）。改之前先用它定位。',
+        schema: {
+            type: 'object',
+            properties: {
+                session: { type: 'string' }, namePattern: { type: 'string' }, type: { type: 'string' },
+                valuePattern: { type: 'string' }, exportFilter: { type: 'string' }, limit: { type: 'number' },
+            },
+            required: ['session'],
+        },
+        run: function (a) {
+            var pkg = getAsset(a.session).pkg;
+            var nameRe = a.namePattern ? new RegExp(a.namePattern, 'i') : null;
+            var valRe = a.valuePattern ? new RegExp(a.valuePattern, 'i') : null;
+            var expRe = a.exportFilter ? new RegExp(a.exportFilter, 'i') : null;
+            var limit = a.limit || 100;
+            var hits = [];
+            for (var i = 0; i < pkg.exports.length && hits.length < limit; i++) {
+                var exp = pkg.exports[i];
+                if (expRe && !expRe.test(exp.objectName)) continue;
+                var props;
+                try { props = pkg.parseExport(i); } catch (e) { continue; }
+                if (!props) continue;
+                (function walk(list, prefix) {
+                    list.forEach(function (p) {
+                        if (hits.length >= limit || !p || typeof p !== 'object') return;
+                        var here = prefix + '.' + p.name + (p.arrayIndex ? '[' + p.arrayIndex + ']' : '');
+                        if ((!nameRe || nameRe.test(p.name)) && (!a.type || p.type === a.type)) {
+                            var shown = preview(p.value);
+                            if (!valRe || valRe.test(JSON.stringify(shown))) {
+                                hits.push({ exportIndex: i, exportName: exp.objectName, path: here, type: p.type, structName: p.structName, size: p.size, value: shown });
+                            }
+                        }
+                        if (Array.isArray(p.value)) {
+                            p.value.forEach(function (el, k) { if (Array.isArray(el)) walk(el, here + '[' + k + ']'); });
+                        }
+                    });
+                })(props, exp.objectName);
+            }
+            return { matched: hits.length, truncated: hits.length >= limit, items: hits };
+        },
+    };
+
+    T.uasset_set_by_query = {
+        desc: '按条件批量改值（支持 value / scale / offset）。dryRun=true 只报告不落地。',
+        schema: {
+            type: 'object',
+            properties: {
+                session: { type: 'string' }, namePattern: { type: 'string' }, type: { type: 'string' },
+                exportFilter: { type: 'string' }, value: {}, scale: { type: 'number' }, offset: { type: 'number' },
+                limit: { type: 'number' }, dryRun: { type: 'boolean' },
+            },
+            required: ['session'],
+        },
+        run: function (a) {
+            if (a.value === undefined && a.scale === undefined && a.offset === undefined) {
+                throw new Error('必须给出 value / scale / offset 之一');
+            }
+            var pkg = getAsset(a.session).pkg;
+            var q = T.uasset_query.run({
+                session: a.session, namePattern: a.namePattern, type: a.type,
+                exportFilter: a.exportFilter, limit: a.limit || 50,
+            });
+            var out = q.items.filter(function (x) {
+                return x.type !== 'StructProperty' && x.type !== 'ArrayProperty';
+            }).map(function (x) {
+                var before = x.value;
+                var next = a.value !== undefined ? a.value
+                    : (typeof before === 'number' ? before * (a.scale === undefined ? 1 : a.scale) + (a.offset || 0) : before);
+                if (a.dryRun) return { path: x.path, type: x.type, before: before, after: next, applied: false };
+                try {
+                    var r = pkg.set(x.path, next);
+                    return { path: x.path, type: r.type, before: preview(r.before), after: preview(r.after), mode: r.mode, applied: true };
+                } catch (e) {
+                    return { path: x.path, error: String(e.message || e), applied: false };
+                }
+            });
+            return {
+                matched: out.length,
+                applied: out.filter(function (r) { return r.applied; }).length,
+                dryRun: !!a.dryRun,
+                results: out,
+            };
+        },
+    };
+
+    T.uasset_batch = {
+        desc: '一次提交多条 set / delete / add，任何一条失败整批回滚。',
+        schema: {
+            type: 'object',
+            properties: { session: { type: 'string' }, ops: { type: 'array', items: { type: 'object' } }, stopOnError: { type: 'boolean' } },
+            required: ['session', 'ops'],
+        },
+        run: function (a) {
+            var pkg = getAsset(a.session).pkg;
+            var snap = pkg.snapshotState();
+            var done = [];
+            var stopOnError = a.stopOnError !== false;
+            try {
+                (a.ops || []).forEach(function (op) {
+                    var kind = op.op || 'set';
+                    if (kind === 'set') done.push(Object.assign({ op: kind }, pkg.set(op.path, op.value)));
+                    else if (kind === 'delete') done.push(Object.assign({ op: kind }, pkg.removeProperty(op.path)));
+                    else if (kind === 'add') done.push(Object.assign({ op: kind }, pkg.addProperty(op.export, op.def)));
+                    else throw new Error('未知 op: ' + kind + '（支持 set/delete/add）');
+                });
+            } catch (e) {
+                if (stopOnError) {
+                    pkg.restoreState(snap);
+                    return { committed: false, rolledBack: true, completedBeforeError: done.length, error: String(e.message || e) };
+                }
+                done.push({ op: 'error', error: String(e.message || e) });
+            }
+            return { committed: true, count: done.length, results: done };
+        },
+    };
+
+    T.uasset_validate = {
+        desc: '逐个导出体检：哪些能完整解析、哪些退化成原始字节块、哪些失败。改之前先跑。',
+        schema: { type: 'object', properties: { session: { type: 'string' }, limit: { type: 'number' } }, required: ['session'] },
+        run: function (a) {
+            var pkg = getAsset(a.session).pkg;
+            var n = Math.min(pkg.exports.length, a.limit || pkg.exports.length);
+            var items = [], ok = 0, degraded = 0, failed = 0;
+            for (var i = 0; i < n; i++) {
+                var exp = pkg.exports[i];
+                if (!exp.serialSize) { items.push({ index: i, name: exp.objectName, status: 'empty' }); continue; }
+                try {
+                    var props = pkg.parseExport(i);
+                    var raw = countRaw(props);
+                    if (raw) { degraded++; items.push({ index: i, name: exp.objectName, status: 'degraded', rawBlocks: raw, properties: props.length }); }
+                    else { ok++; items.push({ index: i, name: exp.objectName, status: 'ok', properties: props.length }); }
+                } catch (e) {
+                    failed++;
+                    items.push({ index: i, name: exp.objectName, status: 'failed', error: String(e.message || e) });
+                }
+            }
+            return {
+                total: n, ok: ok, degraded: degraded, failed: failed,
+                items: items.filter(function (x) { return x.status !== 'ok'; }).slice(0, 60),
+                note: degraded ? 'degraded 的导出含未解析原始块，优先改定长字段' : '全部导出可完整解析',
+            };
+        },
+    };
+
+    T.uasset_snapshot = {
+        desc: '给会话打快照（内存内），不满意可 uasset_restore 退回。',
+        schema: { type: 'object', properties: { session: { type: 'string' }, label: { type: 'string' } }, required: ['session'] },
+        run: function (a) {
+            var asset = getAsset(a.session);
+            asset.snaps = asset.snaps || new Map();
+            var id = 'snap' + (asset.snaps.size + 1);
+            asset.snaps.set(id, { state: asset.pkg.snapshotState(), label: a.label || '' });
+            return { snapshot: id, label: a.label || '', available: Array.from(asset.snaps.keys()) };
+        },
+    };
+
+    T.uasset_restore = {
+        desc: '恢复到某个快照（默认最近一个）。',
+        schema: { type: 'object', properties: { session: { type: 'string' }, snapshot: { type: 'string' } }, required: ['session'] },
+        run: function (a) {
+            var asset = getAsset(a.session);
+            if (!asset.snaps || !asset.snaps.size) throw new Error('没有快照，先调用 uasset_snapshot');
+            var id = a.snapshot || Array.from(asset.snaps.keys()).pop();
+            var s = asset.snaps.get(id);
+            if (!s) throw new Error('快照不存在: ' + id);
+            asset.pkg.restoreState(s.state);
+            return { restored: id, label: s.label, ...asset.pkg.info() };
+        },
+    };
+
+    T.uasset_search = {
+        desc: '在名称表与属性值里搜字符串（支持正则）。',
+        schema: {
+            type: 'object',
+            properties: { session: { type: 'string' }, query: { type: 'string' }, regex: { type: 'boolean' }, limit: { type: 'number' } },
+            required: ['session', 'query'],
+        },
+        run: function (a) {
+            return getAsset(a.session).pkg.search(a.query, { regex: !!a.regex, limit: a.limit || 100 });
+        },
+    };
+
+    T.uasset_hexdump = {
+        desc: '看某个导出的原始字节十六进制（分页）。',
+        schema: {
+            type: 'object',
+            properties: { session: { type: 'string' }, export: {}, offset: { type: 'number' }, length: { type: 'number' } },
+            required: ['session', 'export'],
+        },
+        run: function (a) {
+            return getAsset(a.session).pkg.hexDump(a.export, { offset: a.offset || 0, length: a.length || 256 });
+        },
+    };
+
+    T.uasset_patch_bytes = {
+        desc: '在导出内按偏移写原始字节（hex）。用于改解析器没覆盖到的字段。',
+        schema: {
+            type: 'object',
+            properties: { session: { type: 'string' }, export: {}, offset: { type: 'number' }, hex: { type: 'string' } },
+            required: ['session', 'export', 'offset', 'hex'],
+        },
+        run: function (a) {
+            return getAsset(a.session).pkg.patchBytes(a.export, a.offset, a.hex);
+        },
+    };
+
+    T.uasset_blueprint = {
+        desc: '蓝图视图：类/父类、函数、组件、CDO 默认值一览。比直接 dump 属性树更适合先看懂结构。',
+        schema: { type: 'object', properties: { session: { type: 'string' }, limit: { type: 'number' } }, required: ['session'] },
+        run: function (a) {
+            var pkg = getAsset(a.session).pkg;
+            var limit = a.limit || 60;
+            var classes = [], functions = [], components = [], defaults = [];
+            for (var i = 0; i < pkg.exports.length; i++) {
+                var exp = pkg.exports[i];
+                var cls = pkg.exportList({ offset: i, limit: 1 }).items[0].className || '';
+                if (/Class$/.test(cls)) classes.push({ index: i, name: exp.objectName, className: cls, size: exp.serialSize });
+                if (cls === 'Function') functions.push({ index: i, name: exp.objectName, size: exp.serialSize });
+                if (/Component/.test(exp.objectName) && exp.serialSize && exp.serialSize < 4096) {
+                    components.push({ index: i, name: exp.objectName, size: exp.serialSize });
+                }
+                if (exp.objectName.indexOf('Default__') === 0) {
+                    var props = [];
+                    try { props = pkg.parseExport(i) || []; } catch (e) { props = []; }
+                    defaults.push({
+                        index: i, name: exp.objectName, propertyCount: props.length,
+                        properties: props.slice(0, limit).map(function (p) {
+                            return {
+                                name: p.name, type: p.type, structName: p.structName, innerType: p.innerType,
+                                value: preview(p.value), editable: p.type !== 'StructProperty' && p.type !== 'ArrayProperty',
+                            };
+                        }),
+                    });
+                }
+            }
+            return {
+                asset: pkg.name, isBlueprint: classes.length > 0,
+                classes: classes.slice(0, limit), functions: functions.slice(0, limit),
+                components: components.slice(0, limit), defaults: defaults,
+            };
+        },
+    };
+
+    T.uasset_export_base64 = {
+        desc: '把当前内存里的资产导出成 base64（可选只导出改动后的）。AI 可据此拿到完整文件。',
+        schema: {
+            type: 'object',
+            properties: { session: { type: 'string' }, verify: { type: 'boolean' } },
+            required: ['session'],
+        },
+        run: function (a) {
+            var asset = getAsset(a.session);
+            var out = asset.pkg.save({ verify: a.verify !== false });
+            return {
+                unchanged: !!out.unchanged,
+                verification: out.verification,
+                uassetBase64: bytesToB64(out.uasset),
+                uexpBase64: out.uexp ? bytesToB64(out.uexp) : null,
+                sizes: { uasset: out.uasset.length, uexp: out.uexp ? out.uexp.length : 0 },
+            };
+        },
+    };
+
+    T.uasset_export_json = {
+        desc: '把导出（或整个资产）转成 JSON 结构，便于 AI 引用与对比。',
+        schema: { type: 'object', properties: { session: { type: 'string' }, export: {} }, required: ['session'] },
+        run: function (a) { return getAsset(a.session).pkg.toJSON({ exportRef: a.export === undefined ? null : a.export }); },
+    };
+
+    T.uasset_save = {
+        desc: '保存并写盘。优先用给定 uri（先在 App 里「选择保存位置」拿到）；没给则由 App 弹保存对话框。',
+        schema: {
+            type: 'object',
+            properties: {
+                session: { type: 'string' },
+                uri: { type: 'string', description: '目标 .uasset 的 content:// URI' },
+                uexpUri: { type: 'string', description: '目标 .uexp 的 URI（分离资产需要）' },
+                verify: { type: 'boolean' },
+            },
+            required: ['session'],
+        },
+        run: function (a) {
+            var asset = getAsset(a.session);
+            var out = asset.pkg.save({ verify: a.verify !== false });
+            if (!a.uri) {
+                return {
+                    saved: false,
+                    pending: true,
+                    verification: out.verification,
+                    hint: '需要在手机上选择保存位置：点 App 设置里的「选择保存位置」，再把返回的 uri 传进来；或直接用 uasset_export_base64 取走字节。',
+                    sizes: { uasset: out.uasset.length, uexp: out.uexp ? out.uexp.length : 0 },
+                };
+            }
+            var fs = bridge();
+            var r1 = readJson(fs.writeBase64(a.uri, bytesToB64(out.uasset)));
+            if (!r1 || !r1.ok) throw new Error('写 .uasset 失败: ' + (r1 && r1.error));
+            var r2 = null;
+            if (out.uexp && a.uexpUri) {
+                r2 = readJson(fs.writeBase64(a.uexpUri, bytesToB64(out.uexp)));
+                if (!r2 || !r2.ok) throw new Error('写 .uexp 失败: ' + (r2 && r2.error));
+            }
+            // 以写盘结果为新基线，后续改动基于它继续
+            asset.uasset = out.uasset.slice();
+            asset.uexp = out.uexp ? out.uexp.slice() : null;
+            asset.pkg = new Package({ uasset: asset.uasset, uexp: asset.uexp, name: asset.name });
+            return {
+                saved: true,
+                verification: out.verification,
+                sizes: { uasset: out.uasset.length, uexp: out.uexp ? out.uexp.length : 0 },
+                uexpWritten: !!r2,
+            };
+        },
+    };
+
+    T.uasset_help = {
+        desc: '返回本服务器的工作流、路径语法、常见坑。不确定时先调。',
+        schema: { type: 'object', properties: {} },
+        run: function () { return HELP; },
+    };
+
+    var HELP = {
+        version: '2.0.0 (App)',
+        workflow: [
+            '1) app_status 看已载入哪些资产（session）',
+            '2) app_list_files / app_open_file 打开用户授权过的文件',
+            '3) uasset_validate 先看哪些导出能安全改',
+            '4) uasset_query 按名字/类型定位属性，uasset_get 确认当前值',
+            '5) uasset_set 改值（定长走字节补丁，mode=patch 最安全）',
+            '6) uasset_export_base64 自检通过后取走字节，或 uasset_save 写盘',
+        ],
+        pathSyntax: {
+            exportSelector: '导出名（完整名优先）或 #索引',
+            property: '.属性名',
+            array: '[3]',
+            example: 'Default__BP_Rifle_AUG_C.WeaponAttrModifyConfigList[0].WeaponAttrModifiers[0].ModifyValue',
+        },
+        gotchas: [
+            '只能操作 App 里已载入的资产；没有路径/目录概念（文件访问走 SAF 授权）。',
+            '改之前先 uasset_snapshot，不满意 uasset_restore 退回。',
+            '变长编辑（字符串/数组增删）会重建导出；遇到「未解析原始块」的拒绝提示时改用定长字段。',
+            '写盘需要目标 URI：App 设置里「选择保存位置」后会给出。',
+        ],
+    };
+
+    /* ------------------------------------------------------------ 协议 */
+
+    var TOOL_LIST = Object.keys(T).map(function (name) {
+        return { name: name, description: T[name].desc, inputSchema: T[name].schema };
+    });
+
+    function handleCall(name, args) {
+        var t = T[name];
+        if (!t) throw new Error('未知工具: ' + name + '（可用: ' + Object.keys(T).join(', ') + '）');
+        var missing = (t.schema.required || []).filter(function (k) { return args[k] === undefined; });
+        if (missing.length) throw new Error('缺少参数: ' + missing.join(', '));
+        return t.run(args || {});
+    }
+
+    function handle(msg) {
+        var id = msg && msg.id;
+        var method = msg && msg.method;
+        function ok(result) { return { jsonrpc: '2.0', id: id, result: result }; }
+        function err(code, message) { return { jsonrpc: '2.0', id: id, error: { code: code, message: message } }; }
+        try {
+            switch (method) {
+                case 'initialize':
+                    return ok({
+                        protocolVersion: '2024-11-05',
+                        capabilities: { tools: { listChanged: false } },
+                        serverInfo: { name: 'uasset-studio-app', version: APP_MCP_VERSION },
+                        instructions: '手机上运行的 UE 资产编辑器 MCP。先 app_status，再 uasset_help 了解路径语法。',
+                    });
+                case 'notifications/initialized':
+                case 'initialized':
+                    return null;
+                case 'ping':
+                    return ok({});
+                case 'tools/list':
+                    return ok({ tools: TOOL_LIST });
+                case 'tools/call': {
+                    var p = msg.params || {};
+                    try {
+                        var r = handleCall(p.name, p.arguments || {});
+                        return ok({ content: [{ type: 'text', text: JSON.stringify(r) }], structuredContent: r, isError: false });
+                    } catch (e) {
+                        return ok({ content: [{ type: 'text', text: '错误: ' + (e.message || e) }], isError: true });
+                    }
+                }
+                default:
+                    if (method && method.indexOf('notifications/') === 0) return null;
+                    return err(-32601, '未实现的方法: ' + method);
+            }
+        } catch (e) {
+            return err(-32603, String(e && e.message || e));
+        }
+    }
+
+    var APP_MCP_VERSION = '2.0.0';
+
+    /* ------------------------------------------------------------ 对外 */
+
+
+    /* ------------------------------------------------------------ 设置面板接线 */
+
+    var ui = {};
+
+    function $(id) { try { return document.getElementById(id); } catch (e) { return null; } }
+
+    function hasNativeMcp() {
+        return typeof AndroidMCP !== 'undefined' && AndroidMCP && typeof AndroidMCP.start === 'function';
+    }
+
+    function readStatus() {
+        if (!hasNativeMcp()) return null;
+        try { return JSON.parse(AndroidMCP.status()); } catch (e) { return null; }
+    }
+
+    function renderStatus(st) {
+        var box = ui.status;
+        if (!box) return;
+        if (!hasNativeMcp()) {
+            box.className = 'mcp-status';
+            box.textContent = '当前环境不支持内嵌 MCP（需要在 App 内运行；桌面端用 node src/mcp/server.js）';
+            return;
+        }
+        if (st && st.running) {
+            box.className = 'mcp-status on';
+            box.innerHTML = '';
+            var line1 = document.createElement('div');
+            line1.innerHTML = '运行中 · 端点 <code>' + st.endpoint + '</code>';
+            box.appendChild(line1);
+            if (st.lan && st.lanEndpoint) {
+                var line2 = document.createElement('div');
+                line2.innerHTML = '局域网 <code>' + st.lanEndpoint + '</code>';
+                box.appendChild(line2);
+            }
+            var line3 = document.createElement('div');
+            line3.textContent = '工具 ' + (window.__APP_MCP.toolNames().length) + ' 个 · 已载入资产 ' + assets.size + ' 个';
+            box.appendChild(line3);
+            if (ui.enable) ui.enable.checked = true;
+        } else {
+            box.className = 'mcp-status';
+            box.textContent = '未启动（打开上面的开关）';
+            if (ui.enable) ui.enable.checked = false;
+        }
+    }
+
+    function renderFiles(files) {
+        var box = ui.files;
+        if (!box) return;
+        box.innerHTML = '';
+        var list = (files && files.files) || [];
+        if (!list.length) {
+            box.textContent = '（还没有授权文件）';
+            return;
+        }
+        list.forEach(function (f) {
+            var row = document.createElement('div');
+            row.className = 'mcp-file';
+            var name = document.createElement('span');
+            name.textContent = f.name || f.uri;
+            var del = document.createElement('button');
+            del.textContent = '移除';
+            del.onclick = function () {
+                try {
+                    AndroidFS.forgetAiFile(f.uri);
+                    refreshFiles();
+                } catch (e) { console.warn(e); }
+            };
+            row.appendChild(name);
+            row.appendChild(del);
+            box.appendChild(row);
+        });
+    }
+
+    function refreshFiles() {
+        if (typeof AndroidFS === 'undefined' || !AndroidFS) { renderFiles(null); return; }
+        try { renderFiles(JSON.parse(AndroidFS.listAiFiles())); } catch (e) { renderFiles(null); }
+    }
+
+    function startStop(on) {
+        if (!hasNativeMcp()) {
+            renderStatus(null);
+            return;
+        }
+        var port = parseInt((ui.port && ui.port.value) || '8787', 10);
+        if (!(port >= 1024 && port <= 65535)) {
+            if (ui.status) { ui.status.className = 'mcp-status err'; ui.status.textContent = '端口需在 1024~65535 之间'; }
+            if (ui.enable) ui.enable.checked = false;
+            return;
+        }
+        try {
+            var st;
+            if (on) {
+                st = JSON.parse(AndroidMCP.start(port, !!(ui.lan && ui.lan.checked)));
+            } else {
+                AndroidMCP.stop();
+                st = { running: false };
+            }
+            if (st && st.ok === false) {
+                if (ui.status) { ui.status.className = 'mcp-status err'; ui.status.textContent = '启动失败：' + (st.error || '未知错误'); }
+                if (ui.enable) ui.enable.checked = false;
+                return;
+            }
+            try { localStorage.setItem('mcp_port', String(port)); } catch (e) { }
+            try { localStorage.setItem('mcp_lan', (ui.lan && ui.lan.checked) ? '1' : '0'); } catch (e) { }
+            renderStatus(st);
+        } catch (e) {
+            if (ui.status) { ui.status.className = 'mcp-status err'; ui.status.textContent = '启动失败：' + (e.message || e); }
+            if (ui.enable) ui.enable.checked = false;
+        }
+    }
+
+    function clientConfig() {
+        var st = readStatus();
+        var url = (st && st.endpoint) || 'http://127.0.0.1:8787/mcp';
+        return JSON.stringify({
+            mcpServers: {
+                'uasset-studio-app': { type: 'http', url: url, headers: {} },
+            },
+        }, null, 2);
+    }
+
+    function initUi() {
+        ui.enable = $('mcpEnable');
+        ui.port = $('mcpPort');
+        ui.lan = $('mcpLan');
+        ui.status = $('mcpStatus');
+        ui.files = $('mcpFiles');
+        ui.addFiles = $('mcpAddFiles');
+        ui.saveTarget = $('mcpSaveTarget');
+        ui.copy = $('mcpCopyConfig');
+        if (!ui.enable || !ui.status) return;   // 页面里没有这块面板
+
+        // 恢复上次的端口/局域网设置
+        try {
+            var savedPort = localStorage.getItem('mcp_port');
+            if (savedPort && ui.port) ui.port.value = savedPort;
+            if (ui.lan) ui.lan.checked = localStorage.getItem('mcp_lan') === '1';
+        } catch (e) { }
+
+        ui.enable.onchange = function () { startStop(!!ui.enable.checked); };
+        if (ui.port) {
+            ui.port.onchange = function () {
+                if (ui.enable.checked) startStop(true);   // 改端口后自动重启
+            };
+        }
+        if (ui.lan) {
+            ui.lan.onchange = function () {
+                if (ui.enable.checked) startStop(true);
+            };
+        }
+        if (ui.addFiles) {
+            ui.addFiles.onclick = function () {
+                if (typeof AndroidFS === 'undefined' || !AndroidFS || !AndroidFS.pickForAi) {
+                    alert('需要在 App 内使用');
+                    return;
+                }
+                AndroidFS.pickForAi();
+            };
+        }
+        if (ui.saveTarget) {
+            ui.saveTarget.onclick = function () {
+                if (typeof AndroidFS === 'undefined' || !AndroidFS || !AndroidFS.pickSaveTarget) {
+                    alert('需要在 App 内使用');
+                    return;
+                }
+                AndroidFS.pickSaveTarget('asset.mod.uasset');
+            };
+        }
+        if (ui.copy) {
+            ui.copy.onclick = function () {
+                var text = clientConfig();
+                if (hasNativeMcp() && AndroidMCP.copy) {
+                    AndroidMCP.copy(text);
+                } else if (navigator.clipboard) {
+                    navigator.clipboard.writeText(text).catch(function () { });
+                }
+            };
+        }
+
+        renderStatus(readStatus());
+        refreshFiles();
+    }
+
+    // 页面回调：用户选完可读文件 / 选完保存位置
+    window.__onAiFilesChanged = function (json) {
+        try { renderFiles(typeof json === 'string' ? JSON.parse(json) : json); } catch (e) { refreshFiles(); }
+    };
+    window.__onSaveTargetChosen = function (uri) {
+        window.__lastSaveTarget = uri || null;
+        try {
+            if (uri) {
+                var txt = '已选保存位置，AI 可用这个 URI 写盘：\n' + uri;
+                if (typeof showToast === 'function') showToast('保存位置已就绪');
+                console.log('[MCP]', txt);
+            }
+        } catch (e) { }
+    };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initUi);
+    } else {
+        initUi();
+    }
+
+    // 面板打开时刷新一次状态（用户可能刚在别处改了资产）
+    var settingsBtn = $('settingsToggle');
+    if (settingsBtn) settingsBtn.addEventListener('click', function () { setTimeout(function () { renderStatus(readStatus()); refreshFiles(); }, 50); });
+
+    window.__APP_MCP = {
+        register: function (name, uasset, uexp) {
+            try { return register(name, uasset, uexp); } catch (e) { console.warn('[MCP] 登记资产失败', e); return null; }
+        },
+        // Java 侧通过 evaluateJavascript 调用，传 JSON 字符串，返回响应对象
+        handle: function (requestText) {
+            var msg;
+            try { msg = typeof requestText === 'string' ? JSON.parse(requestText) : requestText; }
+            catch (e) { return { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'JSON 解析失败' } }; }
+            if (Array.isArray(msg)) {
+                return msg.map(handle).filter(Boolean);
+            }
+            return handle(msg);
+        },
+
+        toolNames: function () { return Object.keys(T); },
+        assets: function () { return Array.from(assets.keys()); },
+    };
+})();
 
 })();

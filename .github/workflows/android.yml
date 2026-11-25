@@ -34,6 +34,9 @@ jobs:
       - name: 构建 Web 资源
         run: node scripts/build-web.mjs
 
+      - name: Java 静态检查
+        run: node scripts/lint-java.mjs
+
       - name: 校验 Web 产物洁净性
         run: node scripts/verify-web.mjs
 

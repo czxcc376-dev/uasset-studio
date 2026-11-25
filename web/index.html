@@ -1708,6 +1708,64 @@
         .namemap-node .node-icon {
             display: none;
         }
+
+        /* ---------- MCP 服务面板 ---------- */
+        .mcp-status {
+            font-size: 12px;
+            padding: 8px 10px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border-color);
+            color: var(--text-dim);
+            margin: 6px 0 10px;
+            line-height: 1.6;
+            word-break: break-all;
+        }
+        .mcp-status.on { color: #6fdc8c; border-color: rgba(111, 220, 140, 0.4); }
+        .mcp-status.err { color: #ff8a8a; border-color: rgba(255, 138, 138, 0.4); }
+        .mcp-status code {
+            font-family: ui-monospace, Menlo, Consolas, monospace;
+            color: var(--syntax-name);
+            user-select: text;
+        }
+        .mcp-port {
+            width: 88px;
+            text-align: center;
+            -moz-appearance: textfield;
+        }
+        .mcp-port::-webkit-outer-spin-button,
+        .mcp-port::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        .mcp-files {
+            font-size: 12px;
+            color: var(--text-dim);
+            margin-top: 6px;
+            line-height: 1.8;
+            max-height: 132px;
+            overflow-y: auto;
+        }
+        .mcp-files .mcp-file {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 2px 0;
+        }
+        .mcp-files .mcp-file span { flex: 1; word-break: break-all; }
+        .mcp-files .mcp-file button {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-dim);
+            border-radius: 4px;
+            font-size: 11px;
+            padding: 1px 6px;
+            cursor: pointer;
+        }
+        .mcp-hint {
+            font-size: 11px;
+            color: var(--text-dim);
+            opacity: 0.85;
+            line-height: 1.6;
+            margin-top: 8px;
+        }
     </style>
 <style>
 #authorModal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:99999}
@@ -1997,6 +2055,75 @@
                             <div class="hp-author-row"><span>作者</span><b>小豆</b></div>
                             <div class="hp-author-row"><span>Telegram</span><a class="hp-author-link" data-tg="xmdnb8">@xmdnb8</a></div>
                             <div class="hp-author-row"><span>TG 群</span><a class="hp-author-link" data-tg="xmdnb8">https://t.me/xmdnb8</a></div>
+                        </div>
+                    </div>
+
+                    <div class="settings-section" id="mcpSection">
+                        <div class="settings-section-title">MCP 服务（给 AI 用）</div>
+
+                        <div class="settings-row">
+                            <div class="settings-label">
+                                <span class="settings-title">启用本地 MCP</span>
+                                <span class="settings-desc">AI 客户端连本机端口，直接读写当前资产</span>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="mcpEnable">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+
+                        <div class="settings-row">
+                            <div class="settings-label">
+                                <span class="settings-title">端口</span>
+                                <span class="settings-desc">默认 8787</span>
+                            </div>
+                            <input class="settings-select mcp-port" id="mcpPort" type="number"
+                                   min="1024" max="65535" value="8787" inputmode="numeric">
+                        </div>
+
+                        <div class="settings-row">
+                            <div class="settings-label">
+                                <span class="settings-title">允许局域网访问</span>
+                                <span class="settings-desc">关闭时只监听 127.0.0.1（本机）</span>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="mcpLan">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+
+                        <div class="mcp-status" id="mcpStatus">未启动</div>
+
+                        <button class="settings-action-btn" id="mcpAddFiles">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="7 10 12 15 17 10"></polyline>
+                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                            </svg>
+                            <span>添加可读文件（授权给 AI）</span>
+                        </button>
+
+                        <button class="settings-action-btn" id="mcpSaveTarget">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                                <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                                <polyline points="7 3 7 8 15 8"></polyline>
+                            </svg>
+                            <span>选择保存位置（AI 写盘用）</span>
+                        </button>
+
+                        <button class="settings-action-btn" id="mcpCopyConfig">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                            <span>复制 MCP 客户端配置</span>
+                        </button>
+
+                        <div class="mcp-files" id="mcpFiles"></div>
+                        <div class="mcp-hint" id="mcpHint">
+                            开启后，在 AI 客户端里添加一个 HTTP 类型的 MCP，地址填上面的端点。
+                            资产要先在 App 里打开（或用「添加可读文件」授权），AI 才能看到。
                         </div>
                     </div>
 
